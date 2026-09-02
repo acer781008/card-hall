@@ -1,7 +1,10 @@
+const ADMIN_OWNER_KEY="cardhall_admin_owner_v112";
+let adminOwnerToken=localStorage.getItem(ADMIN_OWNER_KEY);
+if(!adminOwnerToken){adminOwnerToken=(crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2));localStorage.setItem(ADMIN_OWNER_KEY,adminOwnerToken)}
 
 const socket=io(),$=s=>document.querySelector(s),toast=m=>{const n=$("#notice");n.textContent=m;n.classList.add("show");setTimeout(()=>n.classList.remove("show"),1600)};
-socket.emit("adminJoin");socket.on("notice",toast);
-$("#create").onclick=()=>socket.emit("createRoom",{game:$("#game").value,password:$("#password").value,autoStart:$("#auto").value==="1",startCountdown:+$("#startCd").value,turnSeconds:+$("#turn").value,totalRounds:+$("#rounds").value,betweenSeconds:+$("#between").value,continuous:$("#continuous").value==="1"});
+socket.emit("adminJoin",{ownerToken:adminOwnerToken});socket.on("notice",toast);
+$("#create").onclick=()=>socket.emit("createRoom",{ownerToken:adminOwnerToken,game:$("#game").value,password:$("#password").value,autoStart:$("#auto").value==="1",startCountdown:+$("#startCd").value,turnSeconds:+$("#turn").value,totalRounds:+$("#rounds").value,betweenSeconds:+$("#between").value,continuous:$("#continuous").value==="1"});
 socket.on("roomsList",rs=>{window.rs=rs;$("#rooms").innerHTML=rs.length?rs.map(r=>`<div class="room"><div class="roomHead"><div><b>${r.gameName}</b>　房號 <span class="code">${r.code}</span></div><span class="tag">${fmt(r.status)}</span></div>
 <div class="seats">${Array.from({length:r.needPlayers},(_,i)=>r.players[i]?`<div class="seat ${r.players[i].connected?"":"off"}">👤 ${esc(r.players[i].name)}<br><small>${r.players[i].connected?"🟢 在線":"⚪ 斷線保留"}｜🏆 ${r.players[i].wins} 勝${r.players[i].covered?`｜蓋牌 ${r.players[i].covered}`:""}</small></div>`:`<div class="seat off">等待玩家</div>`).join("")}</div>
 <div>連線 <b>${r.connectedCount}/${r.needPlayers}</b>｜共 <b>${r.totalRounds}</b> 回合｜出牌 <b>${r.turnSeconds}</b> 秒｜回合間隔 <b>${r.betweenSeconds}</b> 秒｜持續 <b>${r.continuous?"是":"否"}</b></div>${r.testNote?`<div class="rules">ℹ️ ${esc(r.testNote)}</div>`:""}

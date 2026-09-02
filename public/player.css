@@ -193,3 +193,41 @@ body{overflow-x:hidden}
  box-shadow:0 4px 16px rgba(0,0,0,.22);
 }
 @media(max-width:600px){.lobbyBackBtn{right:8px;top:8px;padding:8px 10px;font-size:12px}}
+
+/* V1.1.2 */
+body.net-offline::before{content:"連線中斷｜正在自動重連";position:fixed;left:50%;top:8px;transform:translateX(-50%);z-index:10020;background:#9d2d2d;color:#fff;padding:7px 12px;border-radius:999px;font-size:12px;font-weight:900}
+.drawnTag{position:absolute;right:-3px;top:-13px;z-index:8;min-width:22px;height:22px;display:grid;place-items:center;border-radius:999px;background:#ffe36b;color:#3d2a06;font-size:12px;font-weight:1000;border:1px solid #8c6a14}
+.game-mahjong .tileBtn.drawn{margin-left:12px!important;box-shadow:0 0 0 3px #5ee6ff,0 2px 0 rgba(168,188,168,.9),0 5px 7px rgba(0,0,0,.34)!important}
+@media(max-width:800px) and (orientation:portrait){
+ body.game-mahjong .topbar{padding:5px 6px;gap:4px;font-size:11px}
+ body.game-mahjong .wood{padding:5px}
+ body.game-mahjong .felt{min-height:600px!important;overflow:visible!important;display:flex;flex-direction:column}
+ body.game-mahjong .seatsP{grid-template-columns:repeat(2,minmax(0,1fr));gap:3px;padding:4px}
+ body.game-mahjong .pseat{padding:3px;font-size:11px}
+ body.game-mahjong .history{display:none}
+ body.game-mahjong .center{position:static!important;transform:none!important;width:100%!important;order:2;padding:2px 4px 0}
+ body.game-mahjong .board{min-height:104px!important}
+ body.game-mahjong .discardGrid{grid-template-columns:repeat(12,22px)!important;gap:1px}
+ body.game-mahjong .discardGrid img{width:22px!important}
+ body.game-mahjong .bottom{position:static!important;order:3;margin-top:auto}
+ body.game-mahjong .hand{min-height:150px!important;grid-template-columns:repeat(9,minmax(0,1fr))!important;gap:3px!important;padding:15px 4px 2px!important}
+ body.game-mahjong .buttons{position:sticky;bottom:0;z-index:40;padding:5px 4px calc(5px + env(safe-area-inset-bottom));margin:0!important;background:rgba(5,49,36,.96)}
+ body.game-mahjong .buttons .btn{min-width:48px!important;padding:8px 6px!important;font-size:12px!important}
+}
+@media(max-width:950px) and (orientation:landscape){
+ body.game-mahjong .topbar{padding:3px 5px;gap:3px;font-size:10px}
+ body.game-mahjong .wood{padding:4px}
+ body.game-mahjong .felt{min-height:410px!important;overflow:visible!important}
+ body.game-mahjong .seatsP{grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:3px;padding:3px}
+ body.game-mahjong .pseat{padding:2px;font-size:10px}
+ body.game-mahjong .history{display:none}
+ body.game-mahjong .center{top:36%!important;width:min(78%,650px)!important}
+ body.game-mahjong .board{min-height:86px!important}
+ body.game-mahjong .discardGrid{grid-template-columns:repeat(12,20px)!important;gap:1px}
+ body.game-mahjong .discardGrid img{width:20px!important}
+ body.game-mahjong .bottom{bottom:2px!important}
+ body.game-mahjong .hand{display:flex!important;flex-wrap:nowrap!important;min-height:76px!important;padding:12px 3px 1px!important;overflow:visible!important}
+ body.game-mahjong .tileBtn{width:min(4.6vw,38px)!important;flex:0 0 min(4.6vw,38px)!important;margin-left:1px!important;margin-right:1px!important;padding:2px 2px 3px!important}
+ body.game-mahjong .tileBtn.drawn{margin-left:9px!important}
+ body.game-mahjong .buttons .btn{min-width:46px!important;padding:6px 6px!important;font-size:11px!important}
+}

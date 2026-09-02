@@ -7,18 +7,23 @@ $("#name").value=localStorage.getItem("cardhall_name")||"";syncSound();
 let everConnected=false;
 socket.on("connect",()=>{
   everConnected=true;
+  document.body.classList.remove("net-offline");
   const c=sessionStorage.getItem("cardhall_room");
   const name=sessionStorage.getItem("cardhall_join_name");
   const password=sessionStorage.getItem("cardhall_pwd")||"";
-  const token=c?sessionStorage.getItem(tokenKey(c)):"";
+  const token=c?savedReconnectToken(c,name):"";
   if(sessionStorage.getItem("cardhall_active")==="1"&&c&&name&&token){
     socket.emit("joinRoom",{code:c,name,password,reconnectToken:token});
   }
 });
+socket.on("disconnect",()=>{document.body.classList.add("net-offline");toast("連線中斷，正在自動重連…")});
+socket.io.on("reconnect",()=>toast("連線已恢復，正在回到原座位…"));
 
 function toast(m){const n=$("#notice");n.textContent=m;n.classList.add("show");setTimeout(()=>n.classList.remove("show"),1700)}
 function tokenKey(c){return "cardhall_token_"+c}
-$("#join").onclick=()=>{const c=$("#code").value.trim(),name=$("#name").value.trim(),password=$("#pwd").value;localStorage.setItem("cardhall_name",name);sessionStorage.setItem("cardhall_room",c);sessionStorage.setItem("cardhall_join_name",name);sessionStorage.setItem("cardhall_pwd",password);socket.emit("joinRoom",{code:c,name,password,reconnectToken:sessionStorage.getItem(tokenKey(c))||""})};
+function persistentTokenKey(c,n){return "cardhall_reconnect_"+c+"_"+String(n||"").trim().toLowerCase()}
+function savedReconnectToken(c,n){return sessionStorage.getItem(tokenKey(c))||localStorage.getItem(persistentTokenKey(c,n))||""}
+$("#join").onclick=()=>{const c=$("#code").value.trim(),name=$("#name").value.trim(),password=$("#pwd").value;localStorage.setItem("cardhall_name",name);sessionStorage.setItem("cardhall_room",c);sessionStorage.setItem("cardhall_join_name",name);sessionStorage.setItem("cardhall_pwd",password);socket.emit("joinRoom",{code:c,name,password,reconnectToken:savedReconnectToken(c,name)})};
 $("#soundBtn").onclick=async()=>{soundOn=!soundOn;localStorage.setItem("cardhall_sound",soundOn?"1":"0");syncSound();if(soundOn){await unlockAudio();beep("click")}};
 $("#cancelBtn").onclick=()=>{sel.clear();renderHand()};
 $("#playBtn").onclick=()=>{if(!state)return;if(state.game==="sevens"){if(sel.size!==1)return toast("請選一張牌");socket.emit("sevenAction",{code,id:[...sel][0],cover:false})}else socket.emit("playCards",{code,ids:[...sel]})};
@@ -48,7 +53,7 @@ $("#leaveBtn").onclick=()=>{if(confirm("確定離開目前房間？")){socket.em
 socket.on("needPassword",()=>$("#pwdWrap").classList.remove("hidden"));
 socket.on("errorMsg",toast);
 socket.on("roomDeleted",()=>{alert("房間已被主控刪除");sessionStorage.removeItem(tokenKey(code));sessionStorage.removeItem("cardhall_active");sessionStorage.removeItem("cardhall_room");sessionStorage.removeItem("cardhall_join_name");sessionStorage.removeItem("cardhall_pwd");location.href="player.html"});
-socket.on("joined",x=>{code=x.code;myPid=x.pid;sessionStorage.setItem(tokenKey(code),x.reconnectToken);sessionStorage.setItem("cardhall_active","1");$("#roomCode").textContent=code;$("#joinWrap").classList.add("hidden");$("#gameWrap").classList.remove("hidden");toast(x.reconnected?"已回到原座位":"已加入房間")});
+socket.on("joined",x=>{code=x.code;myPid=x.pid;sessionStorage.setItem(tokenKey(code),x.reconnectToken);localStorage.setItem(persistentTokenKey(code,sessionStorage.getItem("cardhall_join_name")||$("#name").value),x.reconnectToken);sessionStorage.setItem("cardhall_active","1");$("#roomCode").textContent=code;$("#joinWrap").classList.add("hidden");$("#gameWrap").classList.remove("hidden");toast(x.reconnected?"已回到原座位":"已加入房間")});
 socket.on("privateState",p=>{priv=p;myPid=p.pid;if(sel.size&&![...sel].some(k=>p.hand?.some(c=>(c.uid||c.id)===k)))sel.clear();renderHand();renderButtons()});
 let lastHistLen=0;
 socket.on("roomState",s=>{if(state&&s.history.length>lastHistLen&&s.status==="playing")beep(s.game==="mahjong"?"tile":"card");lastHistLen=s.history.length;state=s;renderState()});
@@ -102,6 +107,7 @@ socket.on("gameSound",e=>{
  else if(e.action==="win"){beep("countFinal");speak("胡")}
 });
 function renderState(){
+ document.body.classList.toggle("game-mahjong",state.game==="mahjong");
  $("#gameName").textContent=state.gameName;$("#online").textContent=`${state.connectedCount}/${state.needPlayers}`;$("#round").textContent=`${state.round}/${state.totalRounds}`;
  $("#seats").innerHTML=Array.from({length:state.needPlayers},(_,i)=>state.players[i]?`<div class="pseat ${i===state.currentTurn?"turn":""} ${state.players[i].connected?"":"off"}">👤 ${esc(state.players[i].name)}<br><span class="statusdot">${state.players[i].connected?"🟢":"⚪ 斷線保留"}｜🏆 ${state.players[i].wins} 勝${state.status==="playing"?"｜剩 "+state.players[i].count:""}${state.players[i].covered?`｜蓋 ${state.players[i].covered}`:""}</span>${state.game==="mahjong"&&state.players[i].melds?.length?`<div class="meldMini">${state.players[i].melds.map(m=>m.tiles.map(t=>`<img src="tiles/${t.id}.svg">`).join("")).join("")}</div>`:""}</div>`:`<div class="pseat off">等待玩家</div>`).join("");
  $("#history").innerHTML=[...state.history].reverse().map(x=>`<div class="hist">${esc(x.text)}</div>`).join("");
@@ -135,17 +141,13 @@ function renderBoard(){
 function renderHand(){
  const h=priv.hand||[],el=$("#hand");
  if(state?.game==="mahjong"){
-   const hasDrawn=(h.length%3===2);
-   el.innerHTML=h.map((c,i)=>{const key=c.uid||`${c.id}-${i}`;return `<button type="button" class="tileBtn ${hasDrawn&&i===h.length-1?"drawn":""}" data-key="${key}" aria-label="${c.id}">
-      <img draggable="false" class="tile ${sel.has(key)?"sel":""}" src="tiles/${c.id}.svg">
+   const drawnUid=priv.drawnUid||null;
+   const ordered=drawnUid?[...h.filter(c=>c.uid!==drawnUid),...h.filter(c=>c.uid===drawnUid)]:[...h];
+   el.innerHTML=ordered.map((c,i)=>{const key=c.uid||`${c.id}-${i}`,isDrawn=drawnUid&&c.uid===drawnUid;return `<button type="button" class="tileBtn ${isDrawn?"drawn":""}" data-key="${key}" aria-label="${c.id}">
+      ${isDrawn?'<span class="drawnTag">摸</span>':""}<img draggable="false" class="tile ${sel.has(key)?"sel":""}" src="tiles/${c.id}.svg">
    </button>`}).join("");
    el.querySelectorAll(".tileBtn").forEach(btn=>{
-     btn.addEventListener("click",e=>{
-       e.preventDefault();
-       const key=btn.dataset.key;
-       sel.clear();sel.add(key);
-       beep("click");renderHand();renderButtons();
-     });
+     btn.addEventListener("click",e=>{e.preventDefault();const key=btn.dataset.key;sel.clear();sel.add(key);beep("click");renderHand();renderButtons()});
    });
  }else{
    el.innerHTML=h.map(c=>`<img class="card ${sel.has(c.id)?"sel":""}" data-id="${c.id}" src="cards/${c.id}.svg">`).join("");
