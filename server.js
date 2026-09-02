@@ -9,11 +9,10 @@ const app=express();
 const server=http.createServer(app);
 const io=new Server(server,{pingTimeout:20000,pingInterval:10000});
 app.use(express.static(path.join(__dirname,"public")));
-app.get("/health",(req,res)=>res.json({ok:true,rooms:rooms.size,version:"1.1.3"}));
+app.get("/health",(req,res)=>res.json({ok:true,rooms:rooms.size,version:"1.1.4"}));
 
 const PORT=process.env.PORT||3000;
 const rooms=new Map();
-const RECONNECT_MS=60000;
 
 const GAME_META={
   big2:{name:"大老二",players:4},
@@ -426,31 +425,20 @@ io.on("connection",socket=>{
   const r=rooms.get(code);if(!r)return socket.emit("notice","找不到房間");
   if(!socket.data?.adminOwnerToken||r.ownerToken!==socket.data.adminOwnerToken)return socket.emit("notice","你沒有這個房間的管理權");
   const p=r.players.find(x=>x.pid===pid);if(!p)return socket.emit("notice","找不到這位玩家");
-  clearTimer(p,"removeTimer");
   if(p.socketId){io.to(p.socketId).emit("kicked",{code:r.code});const ps=io.sockets.sockets.get(p.socketId);if(ps){ps.leave("room:"+r.code);ps.data={}}}
   r.players=r.players.filter(x=>x.pid!==p.pid);hist(r,`${p.name} 已被主控踢除`);
   clearAllTimers(r);clearTimer(r,"reactionTimer");r.status="waiting";r.round=0;resetRoundState(r);emitRoom(r);socket.emit("notice",`${p.name} 已踢除`);
  });
- socket.on("joinRoom",({code,name,password,reconnectToken})=>{
+ socket.on("joinRoom",({code,name,password})=>{
   const r=rooms.get(String(code||"").trim());if(!r)return socket.emit("errorMsg","找不到房間");
   name=String(name||"").trim().slice(0,12);if(!name)return socket.emit("errorMsg","請輸入玩家名稱");
   if(r.password&&String(password||"")!==r.password)return socket.emit("needPassword",true),socket.emit("errorMsg","房間密碼錯誤");
-  let p=null;
-  if(reconnectToken)p=r.players.find(x=>x.reconnectToken===reconnectToken);
-  if(!p){
-   const now=Date.now();
-   p=r.players.find(x=>!x.connected&&x.name.toLowerCase()===name.toLowerCase()&&x.disconnectedAt&&now-x.disconnectedAt<=RECONNECT_MS);
-  }
-  if(p){
-    clearTimer(p,"removeTimer");p.connected=true;p.socketId=socket.id;p.disconnectedAt=null;socket.data={code:r.code,pid:p.pid};socket.join("room:"+r.code);
-    hist(r,`${p.name} 已重新連線`);socket.emit("joined",{code:r.code,pid:p.pid,reconnectToken:p.reconnectToken,reconnected:true});emitRoom(r);return;
-  }
-  if(!["waiting","countdown"].includes(r.status))return socket.emit("errorMsg","遊戲已開始，只有原玩家可以重連");
+  if(!["waiting","countdown"].includes(r.status))return socket.emit("errorMsg","遊戲進行中，請等房間回到等待狀態再加入");
   if(r.players.some(x=>x.name.toLowerCase()===name.toLowerCase()))return socket.emit("errorMsg","此玩家名稱已有人使用");
   if(r.players.length>=GAME_META[r.game].players)return socket.emit("errorMsg","房間已滿");
-  p={pid:uid(),name,reconnectToken:uid(),socketId:socket.id,connected:true,disconnectedAt:null,removeTimer:null,hand:[],covered:[],wins:0,role:null,submitted:false,melds:[],drawnUid:null};
+  const p={pid:uid(),name,socketId:socket.id,connected:true,hand:[],covered:[],wins:0,role:null,submitted:false,melds:[],drawnUid:null};
   r.players.push(p);socket.data={code:r.code,pid:p.pid};socket.join("room:"+r.code);hist(r,`${p.name} 加入房間`);
-  socket.emit("joined",{code:r.code,pid:p.pid,reconnectToken:p.reconnectToken,reconnected:false});emitRoom(r);maybeStart(r);
+  socket.emit("joined",{code:r.code,pid:p.pid});emitRoom(r);maybeStart(r);
  });
  socket.on("playCards",({code,ids})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p)return;let ok=r.game==="big2"?playBig2(r,p,ids||[]):r.game==="landlord"?playDDZ(r,p,ids||[]):false;if(!ok)socket.emit("errorMsg","這手牌目前不能出")});
  socket.on("pass",({code})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p)return;const ok=r.game==="big2"?passBig2(r,p):r.game==="landlord"?passDDZ(r,p):false;if(!ok)socket.emit("errorMsg","現在不能 PASS")});
@@ -461,11 +449,12 @@ io.on("connection",socket=>{
  socket.on("mahjongClaim",({code,type,ids})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p||r.game!=="mahjong")return;if(!mahjongClaim(r,p,type,ids||[]))socket.emit("errorMsg","目前不能執行這個動作")});
  socket.on("mahjongPass",({code})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p||r.game!=="mahjong")return;mahjongPass(r,p)});
  socket.on("mahjongConcealedKong",({code,id})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p||r.game!=="mahjong")return;if(!concealedKong(r,p,id))socket.emit("errorMsg","目前不能暗槓")});
- socket.on("leaveRoom",({code})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p)return;clearTimer(p,"removeTimer");r.players=r.players.filter(x=>x.pid!==p.pid);hist(r,`${p.name} 離開房間`);clearAllTimers(r);r.status="waiting";r.round=0;resetRoundState(r);emitRoom(r);socket.leave("room:"+code);socket.data={};});
+ socket.on("leaveRoom",({code})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p)return;r.players=r.players.filter(x=>x.pid!==p.pid);hist(r,`${p.name} 離開房間`);clearAllTimers(r);r.status="waiting";r.round=0;resetRoundState(r);emitRoom(r);socket.leave("room:"+code);socket.data={};});
  socket.on("disconnect",()=>{
-  const r=rooms.get(socket.data?.code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p)return;p.connected=false;p.socketId=null;p.disconnectedAt=Date.now();hist(r,`${p.name} 斷線，保留座位 60 秒`);emitRoom(r);
-  p.removeTimer=setTimeout(()=>{const rr=rooms.get(r.code);if(!rr)return;const pp=rr.players.find(x=>x.pid===p.pid);if(!pp||pp.connected)return;rr.players=rr.players.filter(x=>x.pid!==p.pid);hist(rr,`${p.name} 超過 60 秒未回來，座位已釋放`);clearAllTimers(rr);rr.status="waiting";rr.round=0;resetRoundState(rr);emitRoom(rr);maybeStart(rr)},RECONNECT_MS);
+  const r=rooms.get(socket.data?.code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p)return;
+  r.players=r.players.filter(x=>x.pid!==p.pid);hist(r,`${p.name} 已斷線並離開房間`);
+  clearAllTimers(r);clearTimer(r,"reactionTimer");r.status="waiting";r.round=0;resetRoundState(r);emitRoom(r);maybeStart(r);
  });
 });
 
-server.listen(PORT,"0.0.0.0",()=>console.log(`Card Hall V1.1.3 Public Test running on http://localhost:${PORT}`));
+server.listen(PORT,"0.0.0.0",()=>console.log(`Card Hall V1.1.4 Public Test running on http://localhost:${PORT}`));
