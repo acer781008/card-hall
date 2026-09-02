@@ -9,7 +9,7 @@ const app=express();
 const server=http.createServer(app);
 const io=new Server(server,{pingTimeout:20000,pingInterval:10000});
 app.use(express.static(path.join(__dirname,"public")));
-app.get("/health",(req,res)=>res.json({ok:true,rooms:rooms.size,version:"1.1.2"}));
+app.get("/health",(req,res)=>res.json({ok:true,rooms:rooms.size,version:"1.1.3"}));
 
 const PORT=process.env.PORT||3000;
 const rooms=new Map();
@@ -60,26 +60,23 @@ function publicRoom(r){
   players:r.players.map(p=>({pid:p.pid,name:p.name,count:p.hand?.length||0,wins:p.wins||0,role:p.role||null,connected:p.connected,covered:p.covered?.length||0,submitted:!!p.submitted,melds:p.melds||[]}))
  };
 }
-async function emitAdmins(){
- const sockets=await io.in("admins").fetchSockets();
- for(const s of sockets){
-  const owner=s.data?.adminOwnerToken;
-  s.emit("roomsList",owner?[...rooms.values()].filter(r=>r.ownerToken===owner).map(publicRoom):[]);
- }
+function emitAdmins(ownerToken){
+ if(!ownerToken)return;
+ io.to("admin:"+ownerToken).emit("roomsList",[...rooms.values()].filter(r=>r.ownerToken===ownerToken).map(publicRoom));
 }
 function emitRoom(r){
  io.to("room:"+r.code).emit("roomState",publicRoom(r));
  for(const p of r.players){
   if(p.socketId) io.to(p.socketId).emit("privateState",{pid:p.pid,hand:p.hand||[],role:p.role||null,submitted:!!p.submitted,melds:p.melds||[],drawnUid:p.drawnUid||null,mahjongOptions:mahjongOptionsFor(r,p)});
  }
- emitAdmins();
+ emitAdmins(r.ownerToken);
 }
 function createRoom(o={}){
  const game=GAME_META[o.game]?o.game:"big2", code=roomCode();
  const r={
   code,game,ownerToken:String(o.ownerToken||""),password:String(o.password||"").slice(0,16),autoStart:o.autoStart!==false,
   startCountdown:Math.max(3,Math.min(20,+o.startCountdown||5)),
-  turnSeconds:Math.max(15,Math.min(120,+o.turnSeconds||30)),
+  turnSeconds:0,
   betweenSeconds:Math.max(3,Math.min(30,+o.betweenSeconds||8)),
   totalRounds:Math.max(1,Math.min(20,+o.totalRounds||4)),
   continuous:!!o.continuous,status:"waiting",round:0,currentTurn:null,
@@ -116,8 +113,7 @@ function manualStart(r){
  return {ok:true};
 }
 function scheduleTurn(r){
- clearTimer(r,"turnTimer");r.turnEndsAt=Date.now()+r.turnSeconds*1000;
- r.turnTimer=setTimeout(()=>timeoutTurn(r),r.turnSeconds*1000);emitRoom(r);
+ clearTimer(r,"turnTimer");r.turnEndsAt=null;emitRoom(r);
 }
 function finishRound(r,p){
  clearTimer(r,"turnTimer");r.turnEndsAt=null;p.wins=(p.wins||0)+1;r.winner={pid:p.pid,name:p.name};r.status="round_end";
@@ -197,7 +193,7 @@ function playSeven(r,p,id,cover=false,auto=false){
 
 function setupChinese(r){
  const d=shuffle(deck52());for(let i=0;i<52;i++)r.players[i%4].hand.push(d[i]);r.players.forEach(p=>sortCards(p.hand));
- r.currentTurn=null;r.turnEndsAt=Date.now()+r.turnSeconds*1000;r.turnTimer=setTimeout(()=>{r.players.forEach(p=>{if(!p.submitted){p.chinese=autoArrange(p.hand);p.submitted=true}});resolveChinese(r)},r.turnSeconds*1000);
+ r.currentTurn=null;r.turnEndsAt=null;clearTimer(r,"turnTimer");emitRoom(r);
 }
 function autoArrange(h){const x=[...h].sort((a,b)=>a.rv-b.rv||a.sv-b.sv);return{front:x.slice(0,3),middle:x.slice(3,8),back:x.slice(8)}}
 function handScore5(cs){
@@ -304,6 +300,7 @@ function mahjongOptionsFor(r,p){
   } return o;
  }
  if(p.pid===r.mahjongReaction.discarderPid)return{};
+ if(r.mahjongReaction.claims?.[p.pid]||r.mahjongReaction.passes?.[p.pid])return{pending:true};
  const t=r.mahjongReaction.tile,di=r.players.findIndex(x=>x.pid===r.mahjongReaction.discarderPid);
  o.win=mahjongWinPlayer(p,t);o.pong=tileCounts(p,t.id)>=2;o.kong=tileCounts(p,t.id)>=3;
  o.chows=idx===(di+1)%4?chowChoices(p,t):[];
@@ -312,6 +309,39 @@ function mahjongOptionsFor(r,p){
 }
 function removeTiles(p,ids){
  const removed=[];for(const id of ids){const pos=p.hand.findIndex(x=>x.id===id);if(pos<0)return null;removed.push(p.hand.splice(pos,1)[0])}return removed;
+}
+function removeClaimedDiscard(r,q){
+ const a=r.board?.discards;if(!a?.length)return;
+ const pos=a.findLastIndex? a.findLastIndex(x=>x.tile?.uid===q.tile?.uid) : (()=>{for(let i=a.length-1;i>=0;i--)if(a[i].tile?.uid===q.tile?.uid)return i;return -1})();
+ if(pos>=0)a.splice(pos,1);
+}
+function reactionResponded(q,pid){return !!(q.claims?.[pid]||q.passes?.[pid])}
+function maybeResolveMahjongReaction(r,claim=null){
+ const q=r.mahjongReaction;if(!q)return;
+ const eligible=q.eligiblePids||[];
+ if(claim){
+  const seat=pid=>r.players.findIndex(x=>x.pid===pid),di=seat(q.discarderPid),dist=pid=>(seat(pid)-di+4)%4,cd=dist(claim.pid);
+  const blockers=eligible.filter(pid=>pid!==claim.pid&&!reactionResponded(q,pid)).some(pid=>{
+    const a=q.eligibleActions?.[pid]||{},d=dist(pid);
+    if(a.win)return true;
+    if(claim.type==="chow")return !!(a.kong||a.pong);
+    if(claim.type==="pong")return !!(a.kong||(a.pong&&d<cd));
+    if(claim.type==="kong")return !!(a.kong&&d<cd);
+    return false;
+  });
+  if(!blockers){resolveMahjongReaction(r);return}
+ }
+ if(eligible.length&&eligible.every(pid=>reactionResponded(q,pid)))resolveMahjongReaction(r);
+}
+function validateMahjongTiles(r){
+ if(r.game!=="mahjong")return;
+ const all=[];
+ for(const p of r.players){all.push(...(p.hand||[]));for(const m of p.melds||[])all.push(...(m.tiles||[]))}
+ all.push(...(r.wall||[]));all.push(...((r.board?.discards||[]).map(x=>x.tile)));
+ const uidSeen=new Set(),counts={};let bad=false;
+ for(const t of all){if(!t)continue;if(t.uid&&uidSeen.has(t.uid))bad=true;if(t.uid)uidSeen.add(t.uid);counts[t.id]=(counts[t.id]||0)+1}
+ for(const [id,n] of Object.entries(counts))if(n>4)bad=true;
+ if(bad)console.error("[Mahjong integrity] duplicate/over-4 tile detected",r.code,counts);
 }
 function drawTile(r,idx){
  if(!r.wall.length){clearTimer(r,"turnTimer");r.turnEndsAt=null;r.status="round_end";r.winner={pid:null,name:"流局"};hist(r,"牌牆已摸完，本回合流局");emitRoom(r);if(r.round>=r.totalRounds){r.status="finished";emitRoom(r)}else r.nextTimer=setTimeout(()=>startRound(r),r.betweenSeconds*1000);return}
@@ -328,12 +358,13 @@ function resolveMahjongReaction(r){
  if(!c){r.currentTurn=(di+1)%4;drawTile(r,r.currentTurn);return}
  const p=r.players.find(x=>x.pid===c.pid),t=q.tile;p.drawnUid=null;
  if(c.type==="win"){hist(r,`🀄 ${p.name} 胡牌`);io.to("room:"+r.code).emit("gameSound",{game:"mahjong",action:"win",playerName:p.name});finishRound(r,p);return}
- if(c.type==="pong"){removeTiles(p,[t.id,t.id]);p.melds.push({type:"碰",tiles:[t,t,t]});hist(r,`${p.name} 碰`);io.to("room:"+r.code).emit("gameSound",{game:"mahjong",action:"pong",playerName:p.name})}
- if(c.type==="kong"){removeTiles(p,[t.id,t.id,t.id]);p.melds.push({type:"明槓",tiles:[t,t,t,t]});hist(r,`${p.name} 明槓`);io.to("room:"+r.code).emit("gameSound",{game:"mahjong",action:"kong",playerName:p.name})}
+ removeClaimedDiscard(r,q);
+ if(c.type==="pong"){const got=removeTiles(p,[t.id,t.id]);if(!got){r.currentTurn=(di+1)%4;drawTile(r,r.currentTurn);return}p.melds.push({type:"碰",tiles:[...got,t]});hist(r,`${p.name} 碰`);io.to("room:"+r.code).emit("gameSound",{game:"mahjong",action:"pong",playerName:p.name})}
+ if(c.type==="kong"){const got=removeTiles(p,[t.id,t.id,t.id]);if(!got){r.currentTurn=(di+1)%4;drawTile(r,r.currentTurn);return}p.melds.push({type:"明槓",tiles:[...got,t]});hist(r,`${p.name} 明槓`);io.to("room:"+r.code).emit("gameSound",{game:"mahjong",action:"kong",playerName:p.name})}
  if(c.type==="chow"){const need=c.ids.filter(id=>id!==t.id);const got=removeTiles(p,need);if(!got){r.currentTurn=(di+1)%4;drawTile(r,r.currentTurn);return}const tiles=[...got,t].sort((a,b)=>a.sort-b.sort);p.melds.push({type:"吃",tiles});hist(r,`${p.name} 吃`);io.to("room:"+r.code).emit("gameSound",{game:"mahjong",action:"chow",playerName:p.name})}
  r.currentTurn=seat(p.pid);p.hand.sort((a,b)=>a.sort-b.sort);
  if(c.type==="kong"){if(r.wall.length){const kt=r.wall.pop();p.hand.push(kt);p.drawnUid=kt.uid}p.hand.sort((a,b)=>a.sort-b.sort)}
- scheduleTurn(r);
+ validateMahjongTiles(r);scheduleTurn(r);
 }
 function discardMahjong(r,p,tileKey,auto=false){
  const idx=r.players.indexOf(p);if(idx!==r.currentTurn||r.mahjongReaction)return false;
@@ -342,9 +373,10 @@ function discardMahjong(r,p,tileKey,auto=false){
  if(realPos<0)return false;
  const[t]=p.hand.splice(realPos,1);p.drawnUid=null;r.board.discards.push({playerPid:p.pid,tile:t});hist(r,`${p.name}${auto?"（系統）":""} 打出一張牌`);io.to("room:"+r.code).emit("gameSound",{game:"mahjong",action:"discard",tileId:t.id,playerName:p.name});
  clearTimer(r,"turnTimer");r.turnEndsAt=null;
- const eligible=r.players.filter(x=>x.pid!==p.pid&&Object.values(mahjongOptionsFor({...r,mahjongReaction:{discarderPid:p.pid,tile:t}},x)).some(v=>Array.isArray(v)?v.length:!!v));
- r.mahjongReaction={discarderPid:p.pid,tile:t,claims:{},passes:{},endsAt:Date.now()+5000};
- if(!eligible.length){r.mahjongReaction=null;r.currentTurn=(idx+1)%4;drawTile(r,r.currentTurn);return true}
+ const probe={...r,mahjongReaction:{discarderPid:p.pid,tile:t}},eligibleData=r.players.filter(x=>x.pid!==p.pid).map(x=>({p:x,o:mahjongOptionsFor(probe,x)})).filter(x=>Object.values(x.o).some(v=>Array.isArray(v)?v.length:!!v));
+ const eligibleActions={};for(const x of eligibleData)eligibleActions[x.p.pid]={win:!!x.o.win,pong:!!x.o.pong,kong:!!x.o.kong,chow:!!x.o.chows?.length};
+ r.mahjongReaction={discarderPid:p.pid,tile:t,claims:{},passes:{},eligiblePids:eligibleData.map(x=>x.p.pid),eligibleActions,endsAt:Date.now()+5000};
+ if(!eligibleData.length){r.mahjongReaction=null;r.currentTurn=(idx+1)%4;drawTile(r,r.currentTurn);return true}
  r.reactionTimer=setTimeout(()=>resolveMahjongReaction(r),5000);emitRoom(r);return true;
 }
 function mahjongClaim(r,p,type,ids=[]){
@@ -352,9 +384,9 @@ function mahjongClaim(r,p,type,ids=[]){
  if(type==="win"&&!o.win)return false;if(type==="pong"&&!o.pong)return false;if(type==="kong"&&!o.kong)return false;
  if(type==="chow"&&!o.chows.some(a=>JSON.stringify(a)===JSON.stringify(ids)))return false;
  q.claims[p.pid]={pid:p.pid,type,ids};delete q.passes[p.pid];emitRoom(r);
- if(type==="win")resolveMahjongReaction(r);return true;
+ if(type==="win")resolveMahjongReaction(r);else maybeResolveMahjongReaction(r,q.claims[p.pid]);return true;
 }
-function mahjongPass(r,p){if(!r.mahjongReaction)return false;r.mahjongReaction.passes[p.pid]=true;delete r.mahjongReaction.claims[p.pid];emitRoom(r);return true}
+function mahjongPass(r,p){const q=r.mahjongReaction;if(!q||!(q.eligiblePids||[]).includes(p.pid))return false;q.passes[p.pid]=true;delete q.claims[p.pid];emitRoom(r);maybeResolveMahjongReaction(r);return true}
 function concealedKong(r,p,id){
  if(r.mahjongReaction||r.players[r.currentTurn]?.pid!==p.pid||tileCounts(p,id)!==4)return false;
  const ts=removeTiles(p,[id,id,id,id]);p.melds.push({type:"暗槓",tiles:ts});hist(r,`${p.name} 暗槓`);io.to("room:"+r.code).emit("gameSound",{game:"mahjong",action:"kong",playerName:p.name});
@@ -374,7 +406,7 @@ io.on("connection",socket=>{
  socket.on("adminJoin",({ownerToken}={})=>{
   ownerToken=String(ownerToken||"").trim();
   if(!ownerToken)return socket.emit("notice","主控身分建立失敗，請重新整理");
-  socket.data.adminOwnerToken=ownerToken;socket.join("admins");emitAdmins();
+  socket.data.adminOwnerToken=ownerToken;socket.join("admins");socket.join("admin:"+ownerToken);emitAdmins(ownerToken);
  });
  socket.on("createRoom",o=>{
   const owner=socket.data?.adminOwnerToken;if(!owner)return socket.emit("notice","請重新登入主控");
@@ -383,12 +415,21 @@ io.on("connection",socket=>{
  socket.on("deleteRoom",({code})=>{
   const r=rooms.get(code);if(!r)return;
   if(!socket.data?.adminOwnerToken||r.ownerToken!==socket.data.adminOwnerToken)return socket.emit("notice","你沒有這個房間的管理權");
-  clearAllTimers(r);io.to("room:"+code).emit("roomDeleted");rooms.delete(code);emitAdmins();socket.emit("notice","房間已刪除");
+  clearAllTimers(r);io.to("room:"+code).emit("roomDeleted");rooms.delete(code);emitAdmins(r.ownerToken);socket.emit("notice","房間已刪除");
  });
  socket.on("startRoom",({code})=>{
   const r=rooms.get(code);if(!r)return socket.emit("notice","找不到房間");
   if(!socket.data?.adminOwnerToken||r.ownerToken!==socket.data.adminOwnerToken)return socket.emit("notice","你沒有這個房間的管理權");
   const x=manualStart(r);if(!x.ok)socket.emit("notice",x.msg);else socket.emit("notice","已啟動開始倒數");
+ });
+ socket.on("kickPlayer",({code,pid})=>{
+  const r=rooms.get(code);if(!r)return socket.emit("notice","找不到房間");
+  if(!socket.data?.adminOwnerToken||r.ownerToken!==socket.data.adminOwnerToken)return socket.emit("notice","你沒有這個房間的管理權");
+  const p=r.players.find(x=>x.pid===pid);if(!p)return socket.emit("notice","找不到這位玩家");
+  clearTimer(p,"removeTimer");
+  if(p.socketId){io.to(p.socketId).emit("kicked",{code:r.code});const ps=io.sockets.sockets.get(p.socketId);if(ps){ps.leave("room:"+r.code);ps.data={}}}
+  r.players=r.players.filter(x=>x.pid!==p.pid);hist(r,`${p.name} 已被主控踢除`);
+  clearAllTimers(r);clearTimer(r,"reactionTimer");r.status="waiting";r.round=0;resetRoundState(r);emitRoom(r);socket.emit("notice",`${p.name} 已踢除`);
  });
  socket.on("joinRoom",({code,name,password,reconnectToken})=>{
   const r=rooms.get(String(code||"").trim());if(!r)return socket.emit("errorMsg","找不到房間");
@@ -427,4 +468,4 @@ io.on("connection",socket=>{
  });
 });
 
-server.listen(PORT,"0.0.0.0",()=>console.log(`Card Hall V1.1.2 Public Test running on http://localhost:${PORT}`));
+server.listen(PORT,"0.0.0.0",()=>console.log(`Card Hall V1.1.3 Public Test running on http://localhost:${PORT}`));

@@ -1,8 +1,8 @@
 {
   "name": "multiplayer-card-hall-v1",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "private": true,
-  "description": "多人棋牌館 V1.0 公開版",
+  "description": "多人棋牌館 V1.1.3 多人實測核心修正版",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
