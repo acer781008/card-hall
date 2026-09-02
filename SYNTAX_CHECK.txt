@@ -1,0 +1,9 @@
+server.js: OK
+public/player.js: OK
+public/admin.js: OK
+Static checks:
+- Mahjong unique tile uid: OK
+- Mahjong fixed action buttons: OK
+- DDZ 54-card deck + jokers: OK
+- Manual start when autoStart off: OK
+- Refresh auto-rejoin path: OK

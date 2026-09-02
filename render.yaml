@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: multiplayer-card-hall
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
