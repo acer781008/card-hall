@@ -1,16 +1,11 @@
 
-const socket=io({reconnection:false}),$=s=>document.querySelector(s);
+const socket=io({reconnection:true,reconnectionAttempts:8,reconnectionDelay:500,reconnectionDelayMax:2500}),$=s=>document.querySelector(s);
 let code=null,state=null,priv={hand:[]},sel=new Set(),tick=null,soundOn=localStorage.getItem("cardhall_sound")!=="0",myPid=null;
 let audioCtx=null,audioUnlocked=false,lastCountdownSecond=null,lastTurnSecond=null,mjBusy=false;
 const qp=new URLSearchParams(location.search);if(qp.get("room")){$("#code").value=qp.get("room");$("#code").readOnly=true}
 $("#name").value=localStorage.getItem("cardhall_name")||"";syncSound();
 let joinedRoom=false;
-socket.on("disconnect",()=>{
-  if(!joinedRoom)return;
-  joinedRoom=false;
-  alert("連線已中斷，請重新加入房間。");
-  location.href="player.html";
-});
+socket.on("disconnect",()=>{if(joinedRoom)toast("連線不穩，正在重新連線…")});
 
 function toast(m){const n=$("#notice");n.textContent=m;n.classList.add("show");setTimeout(()=>n.classList.remove("show"),1700)}
 $("#join").onclick=()=>{const c=$("#code").value.trim(),name=$("#name").value.trim(),password=$("#pwd").value;localStorage.setItem("cardhall_name",name);socket.emit("joinRoom",{code:c,name,password})};
@@ -132,6 +127,8 @@ function renderBoard(){
  else if(state.game==="mahjong")b.innerHTML=`${state.mahjongReaction?`<div class="reactionText">等待可操作玩家選擇 吃／碰／槓／胡／過</div>`:""}<div class="discardGrid">${(state.board?.discards||[]).slice(-36).map(x=>`<img src="tiles/${x.tile.id}.svg">`).join("")}</div>`;
  else b.innerHTML="十三支：完成排牌後等待其他玩家";
 }
+function sevenSort(h){const r={A:1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,"10":10,J:11,Q:12,K:13},s={C:0,D:1,H:2,S:3};return [...h].sort((a,b)=>s[a.suit]-s[b.suit]||r[a.rank]-r[b.rank])}
+function sevenLegalClient(c){const a=state?.board?.[c.suit]||[],o={A:1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,"10":10,J:11,Q:12,K:13},v=o[c.rank];if(!a.length)return c.rank==="7";const z=a.map(x=>o[x.rank]);return v===Math.min(...z)-1||v===Math.max(...z)+1}
 function renderHand(){
  const h=priv.hand||[],el=$("#hand");
  if(state?.game==="mahjong"){
@@ -165,5 +162,5 @@ function startTicker(){
    $("#timer").textContent="";lastTurnSecond=null;
  },120)
 }
-function rule(g){if(g==="big2")return "大老二：3 最小、2 最大；花色 ♣<♦<♥<♠；持有 ♣3 者先出，第一手需含 ♣3。五張牌型：順子＜同花＜葫蘆＜鐵支＜同花順。沒有出牌倒數，輪到玩家時等待玩家自行操作。";if(g==="sevens")return "牌七：持有 ♠7 者先出。每個花色從 7 往上或往下接；如果手上沒有任何合法牌，必須選一張蓋牌。手牌清空即獲勝。";if(g==="chinese")return "十三支：13 張分成前3、中5、後5。本版先用一鍵自動排牌完成多人流程。";if(g==="landlord")return "鬥地主公開測試：54 張（52 張＋小王＋大王）；3 人各 17 張，系統隨機地主後取得 3 張底牌。支援單張、對子、三條、三帶一、三帶二、順子、連對、無翅膀飛機、炸彈、王炸。2 與大小王不能放進順子／連對／飛機。";return "麻將：台灣 16 張。每人平常 16 張，摸牌後 17 張再打一張。支援吃、碰、明槓、暗槓、自摸、別人打出的牌胡牌與過；吃只能吃上家打出的牌。吃碰槓後會顯示在副露區。胡牌基本結構為五組面子＋一對將。"}
+function rule(g){if(g==="big2")return "大老二：3 最小、2 最大；花色 ♣<♦<♥<♠；持有 ♣3 者先出，第一手需含 ♣3。五張牌必須同牌型才能壓。順子 A2345 最小，23456 最大。沒有出牌倒數，輪到玩家時等待玩家自行操作。";if(g==="sevens")return "牌七：持有 ♠7 者先出。每個花色從 7 往上或往下接；如果手上沒有任何合法牌，必須選一張蓋牌。全部玩家處理完手牌後，以蓋牌最少者獲勝。";if(g==="chinese")return "十三支：13 張分成前3、中5、後5。本版先用一鍵自動排牌完成多人流程。";if(g==="landlord")return "鬥地主公開測試：54 張（52 張＋小王＋大王）；3 人各 17 張，系統隨機地主後取得 3 張底牌。支援單張、對子、三條、三帶一、三帶二、順子、連對、無翅膀飛機、炸彈、王炸。2 與大小王不能放進順子／連對／飛機。";return "麻將：台灣 16 張。每人平常 16 張，摸牌後 17 張再打一張。支援吃、碰、明槓、暗槓、自摸、別人打出的牌胡牌與過；吃只能吃上家打出的牌。吃碰槓後會顯示在副露區。胡牌基本結構為五組面子＋一對將。"}
 function esc(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}

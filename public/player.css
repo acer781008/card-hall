@@ -294,3 +294,6 @@ body.game-sevens .center{width:min(94%,760px)}
  body.game-sevens .hand{min-height:62px!important}
  body.game-sevens .card{width:39px!important;flex-basis:39px!important;margin-left:-15px!important}
 }
+
+body.game-sevens .card.legal{outline:3px solid #ffd54f!important;filter:brightness(1.12) contrast(1.08);transform:translateY(-6px)}
+@media(max-width:700px){body.game-chinese .hand{display:flex!important;flex-wrap:nowrap!important;overflow-x:auto!important;justify-content:flex-start!important;padding:5px 18px!important}body.game-chinese .hand .card{flex:0 0 48px!important;margin-left:-16px!important}}
