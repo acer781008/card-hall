@@ -123,6 +123,7 @@ function finishRound(r,p){
  clearTimer(r,"turnTimer");r.turnEndsAt=null;p.wins=(p.wins||0)+1;r.winner={pid:p.pid,name:p.name};r.status="round_end";
  r.matchResults=r.matchResults||[];r.matchResults.push({round:r.round,winner:p.name,at:Date.now(),players:r.players.map(x=>({name:x.name,wins:x.wins||0,covered:(x.covered||[]).length}))});
  hist(r,`🏆 第 ${r.round} 回合：${p.name} 獲勝`);
+ io.to("room:"+r.code).emit("gameSound",{game:r.game,action:"win",playerName:p.name});
  const sorted=[...r.players].sort((a,b)=>(b.wins||0)-(a.wins||0)||a.name.localeCompare(b.name,"zh-Hant"));
  let rank=0,last=null; r.ranking=sorted.map((x,i)=>{if(last===null||x.wins!==last)rank=i+1;last=x.wins;return{rank,name:x.name,wins:x.wins}});
  emitRoom(r);
@@ -149,7 +150,6 @@ function evalBig2(cards){
  const c=sortCards([...cards]),n=c.length,key=x=>x.rv*4+x.sv;
  if(n===1)return{type:"單張",grp:1,str:[key(c[0])]};
  if(n===2&&c[0].rv===c[1].rv)return{type:"對子",grp:2,str:[c[0].rv,Math.max(c[0].sv,c[1].sv)]};
- if(n===3&&c.every(x=>x.rv===c[0].rv))return{type:"三條",grp:3,str:[c[0].rv]};
  if(n!==5)return null;
  const cnt={};c.forEach(x=>cnt[x.rank]=(cnt[x.rank]||0)+1);const groups=Object.entries(cnt).map(([rank,k])=>({rank,k,rv:RANKS.indexOf(rank)}));
  const o={A:1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,"10":10,J:11,Q:12,K:13};
@@ -170,7 +170,7 @@ function playBig2(r,p,ids,auto=false){
  const ev=evalBig2(cards);if(!ev)return false;if(r.firstPlay&&!cards.some(c=>c.id==="3C"))return false;
  if(r.lastPlay){const le=evalBig2(r.lastPlay.cards);if(!le||ev.type!==le.type||cmp(ev.str,le.str)<=0)return false}
  const set=new Set(ids);p.hand=p.hand.filter(c=>!set.has(c.id));r.lastPlay={playerPid:p.pid,cards,type:ev.type};r.passCount=0;r.firstPlay=false;
- hist(r,`${p.name}${auto?"（系統）":""} 出牌：${ev.type}`);io.to("room:"+r.code).emit("gameSound",{game:"big2",action:"play",playerName:p.name});
+ hist(r,`${p.name}${auto?"（系統）":""} 出牌：${ev.type}`);io.to("room:"+r.code).emit("gameSound",{game:"big2",action:"play",playerName:p.name,type:ev.type,cards:cards.map(c=>({id:c.id,rank:c.rank,suit:c.suit}))});
  if(p.hand.length===0)return finishRound(r,p),true;
  r.currentTurn=(idx+1)%4;scheduleTurn(r);return true;
 }
@@ -194,7 +194,7 @@ function playSeven(r,p,id,cover=false,auto=false){
  if(cover){
   if(hasLegal)return false;p.hand=p.hand.filter(x=>x.id!==id);p.covered.push(c);hist(r,`${p.name}${auto?"（系統）":""} 蓋牌 1 張`);io.to("room:"+r.code).emit("gameSound",{game:"sevens",action:"cover",playerName:p.name});
  }else{
-  if(!sevenLegal(r,c))return false;p.hand=p.hand.filter(x=>x.id!==id);r.board[c.suit].push(c);r.board[c.suit].sort((a,b)=>a.rv-b.rv);hist(r,`${p.name}${auto?"（系統）":""} 出 ${c.id}`);io.to("room:"+r.code).emit("gameSound",{game:"sevens",action:"play",playerName:p.name});
+  if(!sevenLegal(r,c))return false;p.hand=p.hand.filter(x=>x.id!==id);r.board[c.suit].push(c);r.board[c.suit].sort((a,b)=>a.rv-b.rv);hist(r,`${p.name}${auto?"（系統）":""} 出 ${c.id}`);io.to("room:"+r.code).emit("gameSound",{game:"sevens",action:"play",playerName:p.name,card:{id:c.id,rank:c.rank,suit:c.suit}});
  }
  if(r.players.every(x=>x.hand.length===0)){const winner=[...r.players].sort((a,b)=>(a.covered?.length||0)-(b.covered?.length||0))[0];return finishRound(r,winner),true}
  let ni=(idx+1)%4,g=0;while(r.players[ni].hand.length===0&&g++<4)ni=(ni+1)%4;r.currentTurn=ni;scheduleTurn(r);return true;
@@ -267,10 +267,10 @@ function ddzBeat(e,last){
 }
 function playDDZ(r,p,ids,auto=false){
  const idx=r.players.indexOf(p);if(idx!==r.currentTurn)return false;const cs=ids.map(id=>p.hand.find(c=>c.id===id)).filter(Boolean);if(cs.length!==ids.length||!cs.length)return false;const e=ddzEval(cs);if(!e||!ddzBeat(e,r.lastPlay))return false;
- const set=new Set(ids);p.hand=p.hand.filter(c=>!set.has(c.id));r.lastPlay={playerPid:p.pid,cards:cs,type:e.type,strength:e.str};r.passCount=0;hist(r,`${p.name}${auto?"（系統）":""} 出牌：${e.type}`);
+ const set=new Set(ids);p.hand=p.hand.filter(c=>!set.has(c.id));r.lastPlay={playerPid:p.pid,cards:cs,type:e.type,strength:e.str};r.passCount=0;hist(r,`${p.name}${auto?"（系統）":""} 出牌：${e.type}`);io.to("room:"+r.code).emit("gameSound",{game:"landlord",action:"play",playerName:p.name,type:e.type,cards:cs.map(c=>({id:c.id,rank:c.rank,suit:c.suit}))});
  if(!p.hand.length){finishRound(r,p);return true}r.currentTurn=(idx+1)%3;scheduleTurn(r);return true;
 }
-function passDDZ(r,p,auto=false){const idx=r.players.indexOf(p);if(idx!==r.currentTurn||!r.lastPlay)return false;hist(r,`${p.name}${auto?"（超時）":""} PASS`);io.to("room:"+r.code).emit("gameSound",{game:"big2",action:"pass",playerName:p.name});r.passCount++;if(r.passCount>=2){r.currentTurn=r.players.findIndex(x=>x.pid===r.lastPlay.playerPid);r.lastPlay=null;r.passCount=0}else r.currentTurn=(idx+1)%3;scheduleTurn(r);return true}
+function passDDZ(r,p,auto=false){const idx=r.players.indexOf(p);if(idx!==r.currentTurn||!r.lastPlay)return false;hist(r,`${p.name}${auto?"（超時）":""} PASS`);io.to("room:"+r.code).emit("gameSound",{game:"landlord",action:"pass",playerName:p.name});r.passCount++;if(r.passCount>=2){r.currentTurn=r.players.findIndex(x=>x.pid===r.lastPlay.playerPid);r.lastPlay=null;r.passCount=0}else r.currentTurn=(idx+1)%3;scheduleTurn(r);return true}
 
 function mahjongDeck(){
  const a=[];
@@ -375,7 +375,7 @@ function resolveMahjongReaction(r){
  const c=win||kp||chow;r.mahjongReaction=null;
  if(!c){r.currentTurn=(di+1)%4;drawTile(r,r.currentTurn);return}
  const p=r.players.find(x=>x.pid===c.pid),t=q.tile;p.drawnUid=null;
- if(c.type==="win"){hist(r,`🀄 ${p.name} 胡牌`);io.to("room:"+r.code).emit("gameSound",{game:"mahjong",action:"win",playerName:p.name});finishRound(r,p);return}
+ if(c.type==="win"){hist(r,`🀄 ${p.name} 胡牌`);finishRound(r,p);return}
  removeClaimedDiscard(r,q);
  if(c.type==="pong"){const got=removeTiles(p,[t.id,t.id]);if(!got){r.currentTurn=(di+1)%4;drawTile(r,r.currentTurn);return}p.melds.push({type:"碰",tiles:[...got,t]});hist(r,`${p.name} 碰`);io.to("room:"+r.code).emit("gameSound",{game:"mahjong",action:"pong",playerName:p.name})}
  if(c.type==="kong"){const got=removeTiles(p,[t.id,t.id,t.id]);if(!got){r.currentTurn=(di+1)%4;drawTile(r,r.currentTurn);return}p.melds.push({type:"明槓",tiles:[...got,t]});hist(r,`${p.name} 明槓`);io.to("room:"+r.code).emit("gameSound",{game:"mahjong",action:"kong",playerName:p.name})}
@@ -468,9 +468,9 @@ io.on("connection",socket=>{
  socket.on("submitChinese",({code,front=[],middle=[],back=[]})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p||r.game!=="chinese"||p.submitted)return;
  const by=id=>p.hand.find(c=>c.id===id),x={front:front.map(by).filter(Boolean),middle:middle.map(by).filter(Boolean),back:back.map(by).filter(Boolean)};
  const all=[...front,...middle,...back];if(all.length!==13||new Set(all).size!==13||!chineseValid(x))return socket.emit("errorMsg","排牌不合法：需前3、中5、後5，且後墩 ≥ 中墩 ≥ 前墩");
- p.chinese=x;p.submitted=true;hist(r,`${p.name} 已完成排牌`);emitRoom(r);if(r.players.every(x=>x.submitted))resolveChinese(r)});
+ p.chinese=x;p.submitted=true;hist(r,`${p.name} 已完成排牌`);io.to("room:"+r.code).emit("gameSound",{game:"chinese",action:"submit",playerName:p.name});emitRoom(r);if(r.players.every(x=>x.submitted))resolveChinese(r)});
  socket.on("mahjongDiscard",({code,uid:tileUid,id})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p||r.game!=="mahjong")return;if(!discardMahjong(r,p,tileUid||id))socket.emit("errorMsg","目前不能打這張牌")});
- socket.on("mahjongWin",({code})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p||r.game!=="mahjong")return;if(r.mahjongReaction){if(!mahjongClaim(r,p,"win"))socket.emit("errorMsg","目前不能胡牌");return}if(r.players[r.currentTurn]?.pid!==p.pid)return socket.emit("errorMsg","還沒輪到你");if(mahjongWinPlayer(p)){io.to("room:"+r.code).emit("gameSound",{game:"mahjong",action:"win",playerName:p.name});finishRound(r,p)}else socket.emit("errorMsg","目前牌型尚未胡牌")});
+ socket.on("mahjongWin",({code})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p||r.game!=="mahjong")return;if(r.mahjongReaction){if(!mahjongClaim(r,p,"win"))socket.emit("errorMsg","目前不能胡牌");return}if(r.players[r.currentTurn]?.pid!==p.pid)return socket.emit("errorMsg","還沒輪到你");if(mahjongWinPlayer(p)){finishRound(r,p)}else socket.emit("errorMsg","目前牌型尚未胡牌")});
  socket.on("mahjongClaim",({code,type,ids})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p||r.game!=="mahjong")return;if(!mahjongClaim(r,p,type,ids||[]))socket.emit("errorMsg","目前不能執行這個動作")});
  socket.on("mahjongPass",({code})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p||r.game!=="mahjong")return;mahjongPass(r,p)});
  socket.on("mahjongConcealedKong",({code,id})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p||r.game!=="mahjong")return;if(!concealedKong(r,p,id))socket.emit("errorMsg","目前不能暗槓")});
