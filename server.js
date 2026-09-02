@@ -8,15 +8,20 @@ const {Server}=require("socket.io");
 const app=express();
 const server=http.createServer(app);
 const io=new Server(server,{pingTimeout:20000,pingInterval:10000});
+app.use(express.json());
+const ADMIN_PASSWORD=process.env.ADMIN_PASSWORD||"1234";
+const adminSessions=new Set();
+app.post("/api/admin-login",(req,res)=>{if(String(req.body?.password||"")!==ADMIN_PASSWORD)return res.status(401).json({ok:false});const token=crypto.randomBytes(24).toString("hex");adminSessions.add(token);setTimeout(()=>adminSessions.delete(token),12*60*60*1000);res.json({ok:true,token})});
+app.post("/api/admin-session",(req,res)=>res.json({ok:adminSessions.has(String(req.body?.token||""))}));
 app.use(express.static(path.join(__dirname,"public")));
-app.get("/health",(req,res)=>res.json({ok:true,rooms:rooms.size,version:"1.1.5"}));
+app.get("/health",(req,res)=>res.json({ok:true,rooms:rooms.size,version:"2.0.0"}));
 
 const PORT=process.env.PORT||3000;
 const rooms=new Map();
 
 const GAME_META={
   big2:{name:"大老二",players:4},
-  sevens:{name:"牌七",players:4},
+  sevens:{name:"接龍",players:4},
   chinese:{name:"十三支",players:4},
   landlord:{name:"鬥地主",players:3},
   mahjong:{name:"麻將",players:4},
@@ -53,7 +58,7 @@ function publicRoom(r){
   turnSeconds:r.turnSeconds, betweenSeconds:r.betweenSeconds, totalRounds:r.totalRounds, continuous:r.continuous,
   round:r.round, currentTurn:r.currentTurn, turnEndsAt:r.turnEndsAt||null, countdownEndsAt:r.countdownEndsAt||null,
   lastPlay:r.lastPlay?{playerPid:r.lastPlay.playerPid,cards:r.lastPlay.cards,type:r.lastPlay.type}:null,
-  board:r.board||null, history:r.history.slice(-12), winner:r.winner||null, ranking:r.ranking||null, testNote:r.testNote||"",
+  board:r.board||null, history:r.history.slice(-12), matchResults:r.matchResults||[], winner:r.winner||null, ranking:r.ranking||null, testNote:r.testNote||"",
   mahjongReaction:r.mahjongReaction?{discarderPid:r.mahjongReaction.discarderPid,tile:r.mahjongReaction.tile,endsAt:r.mahjongReaction.endsAt}:null,
   connectedCount:countConnected(r),
   players:r.players.map(p=>({pid:p.pid,name:p.name,count:p.hand?.length||0,wins:p.wins||0,role:p.role||null,connected:p.connected,covered:p.covered?.length||0,submitted:!!p.submitted,melds:p.melds||[]}))
@@ -66,7 +71,7 @@ function emitAdmins(ownerToken){
 function emitRoom(r){
  io.to("room:"+r.code).emit("roomState",publicRoom(r));
  for(const p of r.players){
-  if(p.socketId) io.to(p.socketId).emit("privateState",{pid:p.pid,hand:p.hand||[],role:p.role||null,submitted:!!p.submitted,melds:p.melds||[],drawnUid:p.drawnUid||null,mahjongOptions:mahjongOptionsFor(r,p)});
+  if(p.socketId) io.to(p.socketId).emit("privateState",{pid:p.pid,hand:p.hand||[],role:p.role||null,submitted:!!p.submitted,melds:p.melds||[],drawnUid:p.drawnUid||null,mahjongOptions:mahjongOptionsFor(r,p),chineseRecommendations:(r.game==="chinese"&&r.status==="playing"&&!p.submitted)?(p.chineseRecommendations||(p.chineseRecommendations=chineseRecommend(p.hand))):[]});
  }
  emitAdmins(r.ownerToken);
 }
@@ -83,7 +88,7 @@ function createRoom(o={}){
   winner:null,ranking:null,countdownEndsAt:null,turnEndsAt:null,wall:[],
   startTimer:null,turnTimer:null,nextTimer:null,reactionTimer:null,mahjongReaction:null,testNote:""
  };
- if(game==="chinese")r.testNote="十三支：V1.0 先採一鍵自動排牌，之後可再升級手動拖曳排牌。";
+
  if(game==="landlord")r.testNote="鬥地主公開測試：54 張（含大小王）、3 人各 17 張＋地主 3 張底牌；支援王炸、炸彈、順子、連對、三帶一／二、無翅膀飛機。地主目前由系統隨機。";
  if(game==="mahjong")r.testNote="麻將：台灣 16 張；支援吃、碰、明槓、暗槓、自摸、放槍胡、過與副露區。";
  rooms.set(code,r);return r;
@@ -165,12 +170,12 @@ function playBig2(r,p,ids,auto=false){
  const ev=evalBig2(cards);if(!ev)return false;if(r.firstPlay&&!cards.some(c=>c.id==="3C"))return false;
  if(r.lastPlay){const le=evalBig2(r.lastPlay.cards);if(!le||ev.type!==le.type||cmp(ev.str,le.str)<=0)return false}
  const set=new Set(ids);p.hand=p.hand.filter(c=>!set.has(c.id));r.lastPlay={playerPid:p.pid,cards,type:ev.type};r.passCount=0;r.firstPlay=false;
- hist(r,`${p.name}${auto?"（系統）":""} 出牌：${ev.type}`);
+ hist(r,`${p.name}${auto?"（系統）":""} 出牌：${ev.type}`);io.to("room:"+r.code).emit("gameSound",{game:"big2",action:"play",playerName:p.name});
  if(p.hand.length===0)return finishRound(r,p),true;
  r.currentTurn=(idx+1)%4;scheduleTurn(r);return true;
 }
 function passBig2(r,p,auto=false){
- const idx=r.players.indexOf(p);if(idx!==r.currentTurn||!r.lastPlay)return false;hist(r,`${p.name}${auto?"（超時）":""} PASS`);r.passCount++;
+ const idx=r.players.indexOf(p);if(idx!==r.currentTurn||!r.lastPlay)return false;hist(r,`${p.name}${auto?"（超時）":""} PASS`);io.to("room:"+r.code).emit("gameSound",{game:"big2",action:"pass",playerName:p.name});r.passCount++;
  if(r.passCount>=3){r.currentTurn=r.players.findIndex(x=>x.pid===r.lastPlay.playerPid);r.lastPlay=null;r.passCount=0}
  else r.currentTurn=(idx+1)%4;scheduleTurn(r);return true;
 }
@@ -187,9 +192,9 @@ function playSeven(r,p,id,cover=false,auto=false){
  const idx=r.players.indexOf(p);if(idx!==r.currentTurn)return false;const c=p.hand.find(x=>x.id===id);if(!c)return false;
  const hasLegal=p.hand.some(x=>sevenLegal(r,x));
  if(cover){
-  if(hasLegal)return false;p.hand=p.hand.filter(x=>x.id!==id);p.covered.push(c);hist(r,`${p.name}${auto?"（系統）":""} 蓋牌 1 張`);
+  if(hasLegal)return false;p.hand=p.hand.filter(x=>x.id!==id);p.covered.push(c);hist(r,`${p.name}${auto?"（系統）":""} 蓋牌 1 張`);io.to("room:"+r.code).emit("gameSound",{game:"sevens",action:"cover",playerName:p.name});
  }else{
-  if(!sevenLegal(r,c))return false;p.hand=p.hand.filter(x=>x.id!==id);r.board[c.suit].push(c);r.board[c.suit].sort((a,b)=>a.rv-b.rv);hist(r,`${p.name}${auto?"（系統）":""} 出 ${c.id}`);
+  if(!sevenLegal(r,c))return false;p.hand=p.hand.filter(x=>x.id!==id);r.board[c.suit].push(c);r.board[c.suit].sort((a,b)=>a.rv-b.rv);hist(r,`${p.name}${auto?"（系統）":""} 出 ${c.id}`);io.to("room:"+r.code).emit("gameSound",{game:"sevens",action:"play",playerName:p.name});
  }
  if(r.players.every(x=>x.hand.length===0)){const winner=[...r.players].sort((a,b)=>(a.covered?.length||0)-(b.covered?.length||0))[0];return finishRound(r,winner),true}
  let ni=(idx+1)%4,g=0;while(r.players[ni].hand.length===0&&g++<4)ni=(ni+1)%4;r.currentTurn=ni;scheduleTurn(r);return true;
@@ -197,9 +202,18 @@ function playSeven(r,p,id,cover=false,auto=false){
 
 function setupChinese(r){
  const d=shuffle(deck52());for(let i=0;i<52;i++)r.players[i%4].hand.push(d[i]);r.players.forEach(p=>sortCards(p.hand));
- r.currentTurn=null;r.turnEndsAt=null;clearTimer(r,"turnTimer");emitRoom(r);
+ r.players.forEach(p=>p.chineseRecommendations=null);r.currentTurn=null;r.turnEndsAt=null;clearTimer(r,"turnTimer");emitRoom(r);
 }
 function autoArrange(h){const x=[...h].sort((a,b)=>a.rv-b.rv||a.sv-b.sv);return{front:x.slice(0,3),middle:x.slice(3,8),back:x.slice(8)}}
+function comb(a,k,start=0,p=[],out=[]){if(p.length===k){out.push([...p]);return out}for(let i=start;i<=a.length-(k-p.length);i++){p.push(a[i]);comb(a,k,i+1,p,out);p.pop()}return out}
+function chineseValid(x){if(!x||x.front?.length!==3||x.middle?.length!==5||x.back?.length!==5)return false;return cmp(handScore5(x.back),handScore5(x.middle))>=0&&cmp(handScore5(x.middle),score3(x.front))>=0}
+function chineseRecommend(h){
+ const fronts=comb([...h],3),best=[];
+ for(const f of fronts){const fs=new Set(f.map(c=>c.id)),rem=h.filter(c=>!fs.has(c.id));for(const m of comb(rem,5)){const ms=new Set(m.map(c=>c.id)),b=rem.filter(c=>!ms.has(c.id));const x={front:f,middle:m,back:b};if(!chineseValid(x))continue;const sc=[...handScore5(b),...handScore5(m),...score3(f)];best.push({x,sc})}}
+ best.sort((a,b)=>-cmp(a.sc,b.sc));return best.slice(0,3).map(z=>z.x);
+}
+function chineseType(cs){const q=cs.length===3?score3(cs):handScore5(cs),n=q[0];return cs.length===3?({0:"高牌",1:"一對",3:"三條"}[n]||"高牌"):({0:"高牌",1:"一對",2:"兩對",3:"三條",4:"順子",5:"同花",6:"葫蘆",7:"鐵支",8:"同花順"}[n]||"牌型")}
+
 function handScore5(cs){
  const v=cs.map(c=>c.rv).sort((a,b)=>a-b),cnt={};v.forEach(x=>cnt[x]=(cnt[x]||0)+1);const g=Object.entries(cnt).map(([x,k])=>({x:+x,k})).sort((a,b)=>b.k-a.k||b.x-a.x);
  const flush=cs.every(c=>c.suit===cs[0].suit),u=[...new Set(v)],st=u.length===5&&u[4]-u[0]===4;
@@ -256,7 +270,7 @@ function playDDZ(r,p,ids,auto=false){
  const set=new Set(ids);p.hand=p.hand.filter(c=>!set.has(c.id));r.lastPlay={playerPid:p.pid,cards:cs,type:e.type,strength:e.str};r.passCount=0;hist(r,`${p.name}${auto?"（系統）":""} 出牌：${e.type}`);
  if(!p.hand.length){finishRound(r,p);return true}r.currentTurn=(idx+1)%3;scheduleTurn(r);return true;
 }
-function passDDZ(r,p,auto=false){const idx=r.players.indexOf(p);if(idx!==r.currentTurn||!r.lastPlay)return false;hist(r,`${p.name}${auto?"（超時）":""} PASS`);r.passCount++;if(r.passCount>=2){r.currentTurn=r.players.findIndex(x=>x.pid===r.lastPlay.playerPid);r.lastPlay=null;r.passCount=0}else r.currentTurn=(idx+1)%3;scheduleTurn(r);return true}
+function passDDZ(r,p,auto=false){const idx=r.players.indexOf(p);if(idx!==r.currentTurn||!r.lastPlay)return false;hist(r,`${p.name}${auto?"（超時）":""} PASS`);io.to("room:"+r.code).emit("gameSound",{game:"big2",action:"pass",playerName:p.name});r.passCount++;if(r.passCount>=2){r.currentTurn=r.players.findIndex(x=>x.pid===r.lastPlay.playerPid);r.lastPlay=null;r.passCount=0}else r.currentTurn=(idx+1)%3;scheduleTurn(r);return true}
 
 function mahjongDeck(){
  const a=[];
@@ -270,7 +284,7 @@ function setupMahjong(r){
  r.wall=shuffle(mahjongDeck());
  for(let k=0;k<16;k++)for(let i=0;i<4;i++)r.players[i].hand.push(r.wall.pop());
  r.players.forEach(p=>{p.hand.sort((a,b)=>a.sort-b.sort);p.melds=[];p.drawnUid=null});
- r.board={discards:[]};r.mahjongReaction=null;r.currentTurn=0;
+ r.board={discards:[],lastDiscard:null};r.mahjongReaction=null;r.currentTurn=0;
  if(r.wall.length){const t=r.wall.pop();r.players[0].hand.push(t);r.players[0].hand.sort((a,b)=>a.sort-b.sort);r.players[0].drawnUid=t.uid}
  scheduleTurn(r);
 }
@@ -375,7 +389,7 @@ function discardMahjong(r,p,tileKey,auto=false){
  let realPos=p.hand.findIndex(x=>x.uid===tileKey);
  if(realPos<0)realPos=p.hand.findIndex(x=>x.id===tileKey);
  if(realPos<0)return false;
- const[t]=p.hand.splice(realPos,1);p.drawnUid=null;r.board.discards.push({playerPid:p.pid,tile:t});hist(r,`${p.name}${auto?"（系統）":""} 打出一張牌`);io.to("room:"+r.code).emit("gameSound",{game:"mahjong",action:"discard",tileId:t.id,playerName:p.name});
+ const[t]=p.hand.splice(realPos,1);p.drawnUid=null;const disc={playerPid:p.pid,playerName:p.name,tile:t,at:Date.now()};r.board.discards.push(disc);r.board.lastDiscard=disc;hist(r,`${p.name}${auto?"（系統）":""} 打出一張牌`);io.to("room:"+r.code).emit("mahjongDiscarded",disc);io.to("room:"+r.code).emit("gameSound",{game:"mahjong",action:"discard",tileId:t.id,playerName:p.name});
  clearTimer(r,"turnTimer");r.turnEndsAt=null;
  const probe={...r,mahjongReaction:{discarderPid:p.pid,tile:t}},eligibleData=r.players.filter(x=>x.pid!==p.pid).map(x=>({p:x,o:mahjongOptionsFor(probe,x)})).filter(x=>Object.values(x.o).some(v=>Array.isArray(v)?v.length:!!v));
  const eligibleActions={};for(const x of eligibleData)eligibleActions[x.p.pid]={win:!!x.o.win,pong:!!x.o.pong,kong:!!x.o.kong,chow:!!x.o.chows?.length};
@@ -407,10 +421,11 @@ function timeoutTurn(r){
 }
 
 io.on("connection",socket=>{
- socket.on("adminJoin",({ownerToken}={})=>{
-  ownerToken=String(ownerToken||"").trim();
+ socket.on("adminJoin",({ownerToken,adminToken}={})=>{
+  ownerToken=String(ownerToken||"").trim();adminToken=String(adminToken||"");
+  if(!adminSessions.has(adminToken))return socket.emit("adminAuthFailed");
   if(!ownerToken)return socket.emit("notice","主控身分建立失敗，請重新整理");
-  socket.data.adminOwnerToken=ownerToken;socket.join("admins");socket.join("admin:"+ownerToken);emitAdmins(ownerToken);
+  socket.data.adminAuthed=true;socket.data.adminOwnerToken=ownerToken;socket.join("admin:"+ownerToken);emitAdmins(ownerToken);
  });
  socket.on("createRoom",o=>{
   const owner=socket.data?.adminOwnerToken;if(!owner)return socket.emit("notice","請重新登入主控");
@@ -434,6 +449,8 @@ io.on("connection",socket=>{
   r.players=r.players.filter(x=>x.pid!==p.pid);hist(r,`${p.name} 已被主控踢除`);
   clearAllTimers(r);clearTimer(r,"reactionTimer");r.status="waiting";r.round=0;resetRoundState(r);emitRoom(r);socket.emit("notice",`${p.name} 已踢除`);
  });
+ socket.on("sendEmoji",({code,emoji})=>{const r=rooms.get(String(code||"")),p=r?.players.find(x=>x.pid===socket.data?.pid);const allowed=["👍","😂","😱","👏","😤","🤔"];if(!r||!p||!allowed.includes(emoji))return;const now=Date.now();if(p.lastEmojiAt&&now-p.lastEmojiAt<1000)return;p.lastEmojiAt=now;io.to("room:"+r.code).emit("emoji",{pid:p.pid,name:p.name,emoji});});
+ socket.on("resumeRoom",({code,pid})=>{const r=rooms.get(String(code||"")),p=r?.players.find(x=>x.pid===String(pid||""));if(!r||!p||p.connected||!p.disconnectGrace)return socket.emit("resumeFailed");clearTimeout(p.disconnectGrace);p.disconnectGrace=null;p.connected=true;p.socketId=socket.id;socket.data={code:r.code,pid:p.pid};socket.join("room:"+r.code);socket.emit("joined",{code:r.code,pid:p.pid,resumed:true});hist(r,`${p.name} 連線已恢復`);emitRoom(r)});
  socket.on("joinRoom",({code,name,password})=>{
   const r=rooms.get(String(code||"").trim());if(!r)return socket.emit("errorMsg","找不到房間");
   name=String(name||"").trim().slice(0,12);if(!name)return socket.emit("errorMsg","請輸入玩家名稱");
@@ -448,7 +465,10 @@ io.on("connection",socket=>{
  socket.on("playCards",({code,ids})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p)return;let ok=r.game==="big2"?playBig2(r,p,ids||[]):r.game==="landlord"?playDDZ(r,p,ids||[]):false;if(!ok)socket.emit("errorMsg","這手牌目前不能出")});
  socket.on("pass",({code})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p)return;const ok=r.game==="big2"?passBig2(r,p):r.game==="landlord"?passDDZ(r,p):false;if(!ok)socket.emit("errorMsg","現在不能 PASS")});
  socket.on("sevenAction",({code,id,cover})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p||r.game!=="sevens")return;if(!playSeven(r,p,id,!!cover))socket.emit("errorMsg",cover?"你還有合法牌可出，不能蓋牌":"這張牌目前不能出")});
- socket.on("submitChinese",({code})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p||r.game!=="chinese"||p.submitted)return;p.chinese=autoArrange(p.hand);p.submitted=true;hist(r,`${p.name} 已完成排牌`);emitRoom(r);if(r.players.every(x=>x.submitted))resolveChinese(r)});
+ socket.on("submitChinese",({code,front=[],middle=[],back=[]})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p||r.game!=="chinese"||p.submitted)return;
+ const by=id=>p.hand.find(c=>c.id===id),x={front:front.map(by).filter(Boolean),middle:middle.map(by).filter(Boolean),back:back.map(by).filter(Boolean)};
+ const all=[...front,...middle,...back];if(all.length!==13||new Set(all).size!==13||!chineseValid(x))return socket.emit("errorMsg","排牌不合法：需前3、中5、後5，且後墩 ≥ 中墩 ≥ 前墩");
+ p.chinese=x;p.submitted=true;hist(r,`${p.name} 已完成排牌`);emitRoom(r);if(r.players.every(x=>x.submitted))resolveChinese(r)});
  socket.on("mahjongDiscard",({code,uid:tileUid,id})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p||r.game!=="mahjong")return;if(!discardMahjong(r,p,tileUid||id))socket.emit("errorMsg","目前不能打這張牌")});
  socket.on("mahjongWin",({code})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p||r.game!=="mahjong")return;if(r.mahjongReaction){if(!mahjongClaim(r,p,"win"))socket.emit("errorMsg","目前不能胡牌");return}if(r.players[r.currentTurn]?.pid!==p.pid)return socket.emit("errorMsg","還沒輪到你");if(mahjongWinPlayer(p)){io.to("room:"+r.code).emit("gameSound",{game:"mahjong",action:"win",playerName:p.name});finishRound(r,p)}else socket.emit("errorMsg","目前牌型尚未胡牌")});
  socket.on("mahjongClaim",({code,type,ids})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p||r.game!=="mahjong")return;if(!mahjongClaim(r,p,type,ids||[]))socket.emit("errorMsg","目前不能執行這個動作")});
@@ -457,9 +477,9 @@ io.on("connection",socket=>{
  socket.on("leaveRoom",({code})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p)return;r.players=r.players.filter(x=>x.pid!==p.pid);hist(r,`${p.name} 離開房間`);clearAllTimers(r);r.status="waiting";r.round=0;resetRoundState(r);emitRoom(r);socket.leave("room:"+code);socket.data={};});
  socket.on("disconnect",()=>{
   const r=rooms.get(socket.data?.code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p)return;
-  r.players=r.players.filter(x=>x.pid!==p.pid);hist(r,`${p.name} 已斷線並離開房間`);
-  clearAllTimers(r);clearTimer(r,"reactionTimer");r.status="waiting";r.round=0;resetRoundState(r);emitRoom(r);maybeStart(r);
+  p.connected=false;p.socketId=null;hist(r,`${p.name} 連線不穩，等待短暫恢復`);emitRoom(r);
+  clearTimeout(p.disconnectGrace);p.disconnectGrace=setTimeout(()=>{if(p.connected)return;r.players=r.players.filter(x=>x.pid!==p.pid);hist(r,`${p.name} 已離開房間`);clearAllTimers(r);clearTimer(r,"reactionTimer");r.status="waiting";r.round=0;resetRoundState(r);emitRoom(r);maybeStart(r)},8000);
  });
 });
 
-server.listen(PORT,"0.0.0.0",()=>console.log(`Card Hall V1.1.5 Public Test running on http://localhost:${PORT}`));
+server.listen(PORT,"0.0.0.0",()=>console.log(`Card Hall V2.0 Official running on http://localhost:${PORT}`));
