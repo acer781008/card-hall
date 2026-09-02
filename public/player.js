@@ -1,29 +1,19 @@
 
-const socket=io(),$=s=>document.querySelector(s);
+const socket=io({reconnection:false}),$=s=>document.querySelector(s);
 let code=null,state=null,priv={hand:[]},sel=new Set(),tick=null,soundOn=localStorage.getItem("cardhall_sound")!=="0",myPid=null;
 let audioCtx=null,audioUnlocked=false,lastCountdownSecond=null,lastTurnSecond=null,mjBusy=false;
 const qp=new URLSearchParams(location.search);if(qp.get("room")){$("#code").value=qp.get("room");$("#code").readOnly=true}
 $("#name").value=localStorage.getItem("cardhall_name")||"";syncSound();
-let everConnected=false;
-socket.on("connect",()=>{
-  everConnected=true;
-  document.body.classList.remove("net-offline");
-  const c=sessionStorage.getItem("cardhall_room");
-  const name=sessionStorage.getItem("cardhall_join_name");
-  const password=sessionStorage.getItem("cardhall_pwd")||"";
-  const token=c?savedReconnectToken(c,name):"";
-  if(sessionStorage.getItem("cardhall_active")==="1"&&c&&name&&token){
-    socket.emit("joinRoom",{code:c,name,password,reconnectToken:token});
-  }
+let joinedRoom=false;
+socket.on("disconnect",()=>{
+  if(!joinedRoom)return;
+  joinedRoom=false;
+  alert("連線已中斷，請重新加入房間。");
+  location.href="player.html";
 });
-socket.on("disconnect",()=>{document.body.classList.add("net-offline");toast("連線中斷，正在自動重連…")});
-socket.io.on("reconnect",()=>toast("連線已恢復，正在回到原座位…"));
 
 function toast(m){const n=$("#notice");n.textContent=m;n.classList.add("show");setTimeout(()=>n.classList.remove("show"),1700)}
-function tokenKey(c){return "cardhall_token_"+c}
-function persistentTokenKey(c,n){return "cardhall_reconnect_"+c+"_"+String(n||"").trim().toLowerCase()}
-function savedReconnectToken(c,n){return sessionStorage.getItem(tokenKey(c))||localStorage.getItem(persistentTokenKey(c,n))||""}
-$("#join").onclick=()=>{const c=$("#code").value.trim(),name=$("#name").value.trim(),password=$("#pwd").value;localStorage.setItem("cardhall_name",name);sessionStorage.setItem("cardhall_room",c);sessionStorage.setItem("cardhall_join_name",name);sessionStorage.setItem("cardhall_pwd",password);socket.emit("joinRoom",{code:c,name,password,reconnectToken:savedReconnectToken(c,name)})};
+$("#join").onclick=()=>{const c=$("#code").value.trim(),name=$("#name").value.trim(),password=$("#pwd").value;localStorage.setItem("cardhall_name",name);socket.emit("joinRoom",{code:c,name,password})};
 $("#soundBtn").onclick=async()=>{soundOn=!soundOn;localStorage.setItem("cardhall_sound",soundOn?"1":"0");syncSound();if(soundOn){await unlockAudio();beep("click")}};
 $("#cancelBtn").onclick=()=>{sel.clear();renderHand()};
 $("#playBtn").onclick=()=>{if(!state)return;if(state.game==="sevens"){if(sel.size!==1)return toast("請選一張牌");socket.emit("sevenAction",{code,id:[...sel][0],cover:false})}else socket.emit("playCards",{code,ids:[...sel]})};
@@ -52,12 +42,12 @@ $("#mjPassBtn").onclick=()=>sendMj("mahjongPass");
 function showChowChoices(cs){const modal=$("#chowModal"),box=$("#chowChoices");box.innerHTML=cs.map((ids,i)=>`<button class="chowChoice" data-i="${i}">${ids.map(id=>`<span><img src="tiles/${id}.svg"><small>${esc(MJ_NAMES[id]||id)}</small></span>`).join("")}</button>`).join("");modal.classList.remove("hidden");box.querySelectorAll(".chowChoice").forEach(b=>b.onclick=()=>{const pick=cs[+b.dataset.i];modal.classList.add("hidden");sendMj("mahjongClaim",{type:"chow",ids:pick})})}
 $("#chowCancel").onclick=()=>$("#chowModal").classList.add("hidden");
 $("#rulesBtn").onclick=()=>alert(rule(state.game));
-$("#leaveBtn").onclick=()=>{if(confirm("確定離開目前房間？")){socket.emit("leaveRoom",{code});sessionStorage.removeItem(tokenKey(code));sessionStorage.removeItem("cardhall_active");sessionStorage.removeItem("cardhall_room");sessionStorage.removeItem("cardhall_join_name");sessionStorage.removeItem("cardhall_pwd");setTimeout(()=>location.href="player.html",200)}};
+$("#leaveBtn").onclick=()=>{if(confirm("確定離開目前房間？")){joinedRoom=false;socket.emit("leaveRoom",{code});setTimeout(()=>location.href="player.html",150)}};
 socket.on("needPassword",()=>$("#pwdWrap").classList.remove("hidden"));
 socket.on("errorMsg",toast);
-socket.on("kicked",()=>{alert("你已被主控踢出房間");localStorage.removeItem(persistentTokenKey(code,sessionStorage.getItem("cardhall_join_name")||$("#name").value));sessionStorage.removeItem(tokenKey(code));sessionStorage.removeItem("cardhall_active");sessionStorage.removeItem("cardhall_room");sessionStorage.removeItem("cardhall_join_name");sessionStorage.removeItem("cardhall_pwd");location.href="player.html"});
-socket.on("roomDeleted",()=>{alert("房間已被主控刪除");sessionStorage.removeItem(tokenKey(code));sessionStorage.removeItem("cardhall_active");sessionStorage.removeItem("cardhall_room");sessionStorage.removeItem("cardhall_join_name");sessionStorage.removeItem("cardhall_pwd");location.href="player.html"});
-socket.on("joined",x=>{code=x.code;myPid=x.pid;sessionStorage.setItem(tokenKey(code),x.reconnectToken);localStorage.setItem(persistentTokenKey(code,sessionStorage.getItem("cardhall_join_name")||$("#name").value),x.reconnectToken);sessionStorage.setItem("cardhall_active","1");$("#roomCode").textContent=code;$("#joinWrap").classList.add("hidden");$("#gameWrap").classList.remove("hidden");toast(x.reconnected?"已回到原座位":"已加入房間")});
+socket.on("kicked",()=>{joinedRoom=false;alert("你已被主控踢出房間");location.href="player.html"});
+socket.on("roomDeleted",()=>{joinedRoom=false;alert("房間已被主控刪除");location.href="player.html"});
+socket.on("joined",x=>{code=x.code;myPid=x.pid;joinedRoom=true;$("#roomCode").textContent=code;$("#joinWrap").classList.add("hidden");$("#gameWrap").classList.remove("hidden");toast("已加入房間")});
 socket.on("privateState",p=>{priv=p;myPid=p.pid;mjBusy=false;if(sel.size&&![...sel].some(k=>p.hand?.some(c=>(c.uid||c.id)===k)))sel.clear();renderHand();renderButtons()});
 let lastHistLen=0;
 socket.on("roomState",s=>{mjBusy=false;if(state&&s.history.length>lastHistLen&&s.status==="playing")beep(s.game==="mahjong"?"tile":"card");lastHistLen=s.history.length;state=s;renderState()});
@@ -113,7 +103,7 @@ socket.on("gameSound",e=>{
 function renderState(){
  for(const g of ["big2","sevens","chinese","landlord","mahjong"])document.body.classList.toggle("game-"+g,state.game===g);
  $("#gameName").textContent=state.gameName;$("#online").textContent=`${state.connectedCount}/${state.needPlayers}`;$("#round").textContent=`${state.round}/${state.totalRounds}`;
- $("#seats").innerHTML=Array.from({length:state.needPlayers},(_,i)=>state.players[i]?`<div class="pseat ${i===state.currentTurn?"turn":""} ${state.players[i].connected?"":"off"}">👤 ${esc(state.players[i].name)}<br><span class="statusdot">${state.players[i].connected?"🟢":"⚪ 斷線保留"}｜🏆 ${state.players[i].wins} 勝${state.status==="playing"?"｜剩 "+state.players[i].count:""}${state.players[i].covered?`｜蓋 ${state.players[i].covered}`:""}</span>${state.game==="mahjong"&&state.players[i].melds?.length?`<div class="meldMini">${state.players[i].melds.map(m=>m.tiles.map(t=>`<img src="tiles/${t.id}.svg">`).join("")).join("")}</div>`:""}</div>`:`<div class="pseat off">等待玩家</div>`).join("");
+ $("#seats").innerHTML=Array.from({length:state.needPlayers},(_,i)=>state.players[i]?`<div class="pseat ${i===state.currentTurn?"turn":""} ${state.players[i].connected?"":"off"}">👤 ${esc(state.players[i].name)}<br><span class="statusdot">${state.players[i].connected?"🟢":"⚪"}｜🏆 ${state.players[i].wins} 勝${state.status==="playing"?"｜剩 "+state.players[i].count:""}${state.players[i].covered?`｜蓋 ${state.players[i].covered}`:""}</span>${state.game==="mahjong"&&state.players[i].melds?.length?`<div class="meldMini">${state.players[i].melds.map(m=>m.tiles.map(t=>`<img src="tiles/${t.id}.svg">`).join("")).join("")}</div>`:""}</div>`:`<div class="pseat off">等待玩家</div>`).join("");
  $("#history").innerHTML=[...state.history].reverse().map(x=>`<div class="hist">${esc(x.text)}</div>`).join("");
  if(state.status==="waiting")$("#turnText").textContent=`等待玩家（${state.connectedCount}/${state.needPlayers}）`;else if(state.status==="countdown")$("#turnText").textContent="準備開始";else if(state.status==="playing"){if(state.game==="chinese")$("#turnText").textContent="請完成本回合排牌";else{const p=state.players[state.currentTurn];$("#turnText").textContent=p?(p.pid===myPid?"⬇ 輪到你":"輪到："+p.name):""}}else $("#turnText").textContent="本回合結束";
  $("#countdown").classList.toggle("hidden",state.status!=="countdown");renderBoard();renderButtons();renderResult();startTicker();

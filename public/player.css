@@ -195,7 +195,6 @@ body{overflow-x:hidden}
 @media(max-width:600px){.lobbyBackBtn{right:8px;top:8px;padding:8px 10px;font-size:12px}}
 
 /* V1.1.2 */
-body.net-offline::before{content:"連線中斷｜正在自動重連";position:fixed;left:50%;top:8px;transform:translateX(-50%);z-index:10020;background:#9d2d2d;color:#fff;padding:7px 12px;border-radius:999px;font-size:12px;font-weight:900}
 .drawnTag{position:absolute;right:-3px;top:-13px;z-index:8;min-width:22px;height:22px;display:grid;place-items:center;border-radius:999px;background:#ffe36b;color:#3d2a06;font-size:12px;font-weight:1000;border:1px solid #8c6a14}
 .game-mahjong .tileBtn.drawn{margin-left:12px!important;box-shadow:0 0 0 3px #5ee6ff,0 2px 0 rgba(168,188,168,.9),0 5px 7px rgba(0,0,0,.34)!important}
 @media(max-width:800px) and (orientation:portrait){
@@ -254,4 +253,44 @@ body.net-offline::before{content:"連線中斷｜正在自動重連";position:fi
  body.game-big2 .card.sel,body.game-sevens .card.sel,body.game-landlord .card.sel{transform:translateY(-12px)!important}
  body.game-big2 .buttons,body.game-sevens .buttons,body.game-landlord .buttons{gap:4px!important;margin-top:0!important}
  body.game-big2 .buttons .btn,body.game-sevens .buttons .btn,body.game-landlord .buttons .btn{min-width:58px!important;padding:6px 7px!important;font-size:11px!important}
+}
+
+
+/* V1.1.4 手機實測修正：操作鈕在手牌上方、牌七縮版、橫向不裁切 */
+.bottom{display:flex;flex-direction:column}
+.bottom .buttons{order:1;margin:0 0 5px}
+.bottom .hand{order:2}
+
+/* 牌七中央牌區：牌面縮小，四列固定緊湊排列 */
+body.game-sevens .board{display:grid;grid-template-columns:1fr;gap:3px;align-content:center}
+body.game-sevens .board img.cardOut{width:44px}
+body.game-sevens .center{width:min(94%,760px)}
+
+@media(max-width:950px) and (orientation:landscape){
+ html,body{min-height:100%;overflow-x:hidden}
+ .wrap{padding:0!important;max-width:none!important}
+ body.game-big2 .wood,body.game-sevens .wood,body.game-landlord .wood,
+ body.game-chinese .wood,body.game-mahjong .wood{padding:3px!important}
+ body.game-big2 .felt,body.game-sevens .felt,body.game-landlord .felt,
+ body.game-chinese .felt{height:calc(100dvh - 45px)!important;min-height:315px!important;max-height:none!important}
+ body.game-sevens .center{top:43%!important;width:min(92%,760px)!important}
+ body.game-sevens .board{min-height:118px!important;gap:1px!important}
+ body.game-sevens .board img.cardOut{width:min(5.2vw,38px)!important}
+ body.game-sevens .bottom{bottom:1px!important}
+ body.game-sevens .hand{min-height:70px!important;padding:4px 3px 1px!important}
+ body.game-sevens .buttons{margin-bottom:1px!important}
+ body.game-sevens .buttons .btn{padding:5px 7px!important}
+}
+
+/* 低高度橫向手機（常見 360~430px 高） */
+@media(max-height:430px) and (orientation:landscape){
+ .topbar{min-height:32px!important}
+ body.game-big2 .felt,body.game-sevens .felt,body.game-landlord .felt,
+ body.game-chinese .felt,body.game-mahjong .felt{min-height:300px!important}
+ .seatsP{padding:2px!important}
+ .pseat{line-height:1.15!important}
+ body.game-sevens .center{top:42%!important}
+ body.game-sevens .board img.cardOut{width:min(4.9vw,35px)!important}
+ body.game-sevens .hand{min-height:62px!important}
+ body.game-sevens .card{width:39px!important;flex-basis:39px!important;margin-left:-15px!important}
 }
