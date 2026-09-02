@@ -9,7 +9,7 @@ const app=express();
 const server=http.createServer(app);
 const io=new Server(server,{pingTimeout:20000,pingInterval:10000});
 app.use(express.static(path.join(__dirname,"public")));
-app.get("/health",(req,res)=>res.json({ok:true,rooms:rooms.size,version:"1.1.4"}));
+app.get("/health",(req,res)=>res.json({ok:true,rooms:rooms.size,version:"1.1.5"}));
 
 const PORT=process.env.PORT||3000;
 const rooms=new Map();
@@ -79,7 +79,7 @@ function createRoom(o={}){
   betweenSeconds:Math.max(3,Math.min(30,+o.betweenSeconds||8)),
   totalRounds:Math.max(1,Math.min(20,+o.totalRounds||4)),
   continuous:!!o.continuous,status:"waiting",round:0,currentTurn:null,
-  players:[],history:[],board:null,lastPlay:null,passCount:0,firstPlay:true,
+  players:[],history:[],matchResults:[],board:null,lastPlay:null,passCount:0,firstPlay:true,
   winner:null,ranking:null,countdownEndsAt:null,turnEndsAt:null,wall:[],
   startTimer:null,turnTimer:null,nextTimer:null,reactionTimer:null,mahjongReaction:null,testNote:""
  };
@@ -116,6 +116,7 @@ function scheduleTurn(r){
 }
 function finishRound(r,p){
  clearTimer(r,"turnTimer");r.turnEndsAt=null;p.wins=(p.wins||0)+1;r.winner={pid:p.pid,name:p.name};r.status="round_end";
+ r.matchResults=r.matchResults||[];r.matchResults.push({round:r.round,winner:p.name,at:Date.now(),players:r.players.map(x=>({name:x.name,wins:x.wins||0,covered:(x.covered||[]).length}))});
  hist(r,`🏆 第 ${r.round} 回合：${p.name} 獲勝`);
  const sorted=[...r.players].sort((a,b)=>(b.wins||0)-(a.wins||0)||a.name.localeCompare(b.name,"zh-Hant"));
  let rank=0,last=null; r.ranking=sorted.map((x,i)=>{if(last===null||x.wins!==last)rank=i+1;last=x.wins;return{rank,name:x.name,wins:x.wins}});
@@ -145,13 +146,16 @@ function evalBig2(cards){
  if(n===2&&c[0].rv===c[1].rv)return{type:"對子",grp:2,str:[c[0].rv,Math.max(c[0].sv,c[1].sv)]};
  if(n===3&&c.every(x=>x.rv===c[0].rv))return{type:"三條",grp:3,str:[c[0].rv]};
  if(n!==5)return null;
- const cnt={};c.forEach(x=>cnt[x.rv]=(cnt[x.rv]||0)+1);const groups=Object.entries(cnt).map(([rv,k])=>({rv:+rv,k}));
- const uniq=[...new Set(c.map(x=>x.rv))],straight=uniq.length===5&&uniq[4]-uniq[0]===4,flush=c.every(x=>x.sv===c[0].sv),hi=uniq[4];
- if(straight&&flush)return{type:"同花順",grp:5,str:[5,hi,Math.max(...c.filter(x=>x.rv===hi).map(x=>x.sv))]};
- if(groups.some(g=>g.k===4))return{type:"鐵支",grp:5,str:[4,groups.find(g=>g.k===4).rv]};
- if(groups.length===2&&groups.some(g=>g.k===3)&&groups.some(g=>g.k===2))return{type:"葫蘆",grp:5,str:[3,groups.find(g=>g.k===3).rv]};
- if(flush)return{type:"同花",grp:5,str:[2,...[...c].sort((a,b)=>key(b)-key(a)).map(key)]};
- if(straight)return{type:"順子",grp:5,str:[1,hi,Math.max(...c.filter(x=>x.rv===hi).map(x=>x.sv))]};
+ const cnt={};c.forEach(x=>cnt[x.rank]=(cnt[x.rank]||0)+1);const groups=Object.entries(cnt).map(([rank,k])=>({rank,k,rv:RANKS.indexOf(rank)}));
+ const o={A:1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,"10":10,J:11,Q:12,K:13};
+ const raw=[...new Set(c.map(x=>x.rank))].sort((x,y)=>o[x]-o[y]).join(",");
+ const sm={"A,2,3,4,5":0,"3,4,5,6,7":1,"4,5,6,7,8":2,"5,6,7,8,9":3,"6,7,8,9,10":4,"7,8,9,10,J":5,"8,9,10,J,Q":6,"9,10,J,Q,K":7,"10,J,Q,K,A":8,"2,3,4,5,6":9};
+ const sr=sm[raw],straight=sr!==undefined,flush=c.every(x=>x.sv===c[0].sv);
+ if(straight&&flush)return{type:"同花順",grp:5,str:[sr,Math.max(...c.map(x=>x.sv))]};
+ if(groups.some(g=>g.k===4))return{type:"鐵支",grp:5,str:[groups.find(g=>g.k===4).rv]};
+ if(groups.length===2&&groups.some(g=>g.k===3)&&groups.some(g=>g.k===2))return{type:"葫蘆",grp:5,str:[groups.find(g=>g.k===3).rv]};
+ if(flush)return{type:"同花",grp:5,str:[...c].sort((a,b)=>key(b)-key(a)).map(key)};
+ if(straight)return{type:"順子",grp:5,str:[sr,Math.max(...c.map(x=>x.sv))]};
  return null;
 }
 function cmp(a,b){for(let i=0;i<Math.max(a.length,b.length);i++){const x=a[i]??0,y=b[i]??0;if(x>y)return 1;if(x<y)return-1}return 0}
@@ -159,7 +163,7 @@ function playBig2(r,p,ids,auto=false){
  const idx=r.players.indexOf(p);if(idx!==r.currentTurn)return false;
  const cards=ids.map(id=>p.hand.find(c=>c.id===id)).filter(Boolean);if(cards.length!==ids.length||!cards.length)return false;
  const ev=evalBig2(cards);if(!ev)return false;if(r.firstPlay&&!cards.some(c=>c.id==="3C"))return false;
- if(r.lastPlay){const le=evalBig2(r.lastPlay.cards);if(!le||ev.grp!==le.grp||cmp(ev.str,le.str)<=0)return false}
+ if(r.lastPlay){const le=evalBig2(r.lastPlay.cards);if(!le||ev.type!==le.type||cmp(ev.str,le.str)<=0)return false}
  const set=new Set(ids);p.hand=p.hand.filter(c=>!set.has(c.id));r.lastPlay={playerPid:p.pid,cards,type:ev.type};r.passCount=0;r.firstPlay=false;
  hist(r,`${p.name}${auto?"（系統）":""} 出牌：${ev.type}`);
  if(p.hand.length===0)return finishRound(r,p),true;
@@ -176,8 +180,8 @@ function setupSevens(r){
  r.board={C:[],D:[],H:[],S:[]};r.currentTurn=r.players.findIndex(p=>p.hand.some(c=>c.id==="7S"));scheduleTurn(r);
 }
 function sevenLegal(r,c){
- const arr=r.board[c.suit];if(!arr.length)return c.rank==="7";
- const iv=arr.map(x=>x.rv),mi=Math.min(...iv),ma=Math.max(...iv);return c.rv===mi-1||c.rv===ma+1;
+ const arr=r.board[c.suit],o={A:1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,"10":10,J:11,Q:12,K:13},v=o[c.rank];
+ if(!arr.length)return c.rank==="7";const vals=arr.map(x=>o[x.rank]),mi=Math.min(...vals),ma=Math.max(...vals);return v===mi-1||v===ma+1;
 }
 function playSeven(r,p,id,cover=false,auto=false){
  const idx=r.players.indexOf(p);if(idx!==r.currentTurn)return false;const c=p.hand.find(x=>x.id===id);if(!c)return false;
@@ -187,7 +191,8 @@ function playSeven(r,p,id,cover=false,auto=false){
  }else{
   if(!sevenLegal(r,c))return false;p.hand=p.hand.filter(x=>x.id!==id);r.board[c.suit].push(c);r.board[c.suit].sort((a,b)=>a.rv-b.rv);hist(r,`${p.name}${auto?"（系統）":""} 出 ${c.id}`);
  }
- if(p.hand.length===0)return finishRound(r,p),true;r.currentTurn=(idx+1)%4;scheduleTurn(r);return true;
+ if(r.players.every(x=>x.hand.length===0)){const winner=[...r.players].sort((a,b)=>(a.covered?.length||0)-(b.covered?.length||0))[0];return finishRound(r,winner),true}
+ let ni=(idx+1)%4,g=0;while(r.players[ni].hand.length===0&&g++<4)ni=(ni+1)%4;r.currentTurn=ni;scheduleTurn(r);return true;
 }
 
 function setupChinese(r){
@@ -457,4 +462,4 @@ io.on("connection",socket=>{
  });
 });
 
-server.listen(PORT,"0.0.0.0",()=>console.log(`Card Hall V1.1.4 Public Test running on http://localhost:${PORT}`));
+server.listen(PORT,"0.0.0.0",()=>console.log(`Card Hall V1.1.5 Public Test running on http://localhost:${PORT}`));
