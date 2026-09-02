@@ -231,3 +231,27 @@ body.net-offline::before{content:"連線中斷｜正在自動重連";position:fi
  body.game-mahjong .tileBtn.drawn{margin-left:9px!important}
  body.game-mahjong .buttons .btn{min-width:46px!important;padding:6px 6px!important;font-size:11px!important}
 }
+
+
+/* V1.1.3 核心實測修正 */
+.chowPanel{width:min(92vw,520px);text-align:center;padding:18px}.chowChoices{display:grid;gap:10px;margin:12px 0}.chowChoice{display:flex;justify-content:center;gap:12px;width:100%;padding:10px;border:2px solid #d8b260;border-radius:12px;background:#fff8df;cursor:pointer}.chowChoice span{display:grid;gap:2px;justify-items:center;color:#3d2b19;font-weight:800}.chowChoice img{width:48px;background:#fff;border-radius:4px}.chowChoice:active{transform:scale(.98)}
+/* 手機橫向：大老二/牌七/鬥地主的手牌保持在畫面內，不再套用麻將九宮格 */
+@media(max-width:950px) and (orientation:landscape){
+ body.game-big2 .felt,body.game-sevens .felt,body.game-landlord .felt{min-height:355px!important;overflow:hidden!important}
+ body.game-big2 .topbar,body.game-sevens .topbar,body.game-landlord .topbar{padding:3px 6px;font-size:10px;gap:4px}
+ body.game-big2 .topbar .btn,body.game-sevens .topbar .btn,body.game-landlord .topbar .btn{padding:5px 7px;font-size:10px;min-height:29px}
+ body.game-big2 .seatsP,body.game-sevens .seatsP,body.game-landlord .seatsP{grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:3px;padding:3px}
+ body.game-big2 .pseat,body.game-sevens .pseat,body.game-landlord .pseat{padding:2px;font-size:10px}
+ body.game-big2 .history,body.game-sevens .history,body.game-landlord .history{display:none!important}
+ body.game-big2 .center,body.game-landlord .center{top:32%!important;width:min(78%,610px)!important}
+ body.game-sevens .center{top:38%!important;width:min(86%,680px)!important}
+ body.game-big2 .board,body.game-landlord .board{min-height:86px!important}
+ body.game-big2 .board img.cardOut,body.game-landlord .board img.cardOut{width:43px!important}
+ body.game-big2 .bottom,body.game-sevens .bottom,body.game-landlord .bottom{bottom:2px!important}
+ body.game-big2 .hand,body.game-sevens .hand,body.game-landlord .hand{display:flex!important;grid-template-columns:none!important;flex-wrap:nowrap!important;justify-content:center!important;align-items:end!important;width:100%!important;min-height:86px!important;overflow:visible!important;padding:12px 4px 2px!important;margin:0!important}
+ body.game-big2 .card,body.game-sevens .card,body.game-landlord .card{width:43px!important;flex:0 0 43px!important;margin-left:-16px!important}
+ body.game-big2 .card:first-child,body.game-sevens .card:first-child,body.game-landlord .card:first-child{margin-left:0!important}
+ body.game-big2 .card.sel,body.game-sevens .card.sel,body.game-landlord .card.sel{transform:translateY(-12px)!important}
+ body.game-big2 .buttons,body.game-sevens .buttons,body.game-landlord .buttons{gap:4px!important;margin-top:0!important}
+ body.game-big2 .buttons .btn,body.game-sevens .buttons .btn,body.game-landlord .buttons .btn{min-width:58px!important;padding:6px 7px!important;font-size:11px!important}
+}

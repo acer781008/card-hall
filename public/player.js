@@ -1,7 +1,7 @@
 
 const socket=io(),$=s=>document.querySelector(s);
 let code=null,state=null,priv={hand:[]},sel=new Set(),tick=null,soundOn=localStorage.getItem("cardhall_sound")!=="0",myPid=null;
-let audioCtx=null,audioUnlocked=false,lastCountdownSecond=null,lastTurnSecond=null;
+let audioCtx=null,audioUnlocked=false,lastCountdownSecond=null,lastTurnSecond=null,mjBusy=false;
 const qp=new URLSearchParams(location.search);if(qp.get("room")){$("#code").value=qp.get("room");$("#code").readOnly=true}
 $("#name").value=localStorage.getItem("cardhall_name")||"";syncSound();
 let everConnected=false;
@@ -43,20 +43,24 @@ $("#specialBtn").onclick=()=>{
    socket.emit("mahjongDiscard",{code,uid:tileUid});sel.clear();renderHand();renderButtons();
  }
 };
-$("#mjWinBtn").onclick=()=>socket.emit("mahjongWin",{code});
-$("#mjPongBtn").onclick=()=>socket.emit("mahjongClaim",{code,type:"pong"});
-$("#mjKongBtn").onclick=()=>{const o=priv.mahjongOptions||{};if(state.mahjongReaction)socket.emit("mahjongClaim",{code,type:"kong"});else if(o.concealedKongs?.length)socket.emit("mahjongConcealedKong",{code,id:o.concealedKongs[0]})};
-$("#mjChowBtn").onclick=()=>{const cs=priv.mahjongOptions?.chows||[];if(!cs.length)return;let pick=cs[0];if(cs.length>1){const msg=cs.map((x,i)=>`${i+1}. ${x.join(" ")}`).join("\n");const n=+prompt("選擇吃法：\n"+msg,"1");if(!n||!cs[n-1])return;pick=cs[n-1]}socket.emit("mahjongClaim",{code,type:"chow",ids:pick})};
-$("#mjPassBtn").onclick=()=>socket.emit("mahjongPass",{code});
+function sendMj(event,payload={}){if(mjBusy)return;mjBusy=true;renderButtons();socket.emit(event,{code,...payload});setTimeout(()=>{mjBusy=false;renderButtons()},900)}
+$("#mjWinBtn").onclick=()=>sendMj("mahjongWin");
+$("#mjPongBtn").onclick=()=>sendMj("mahjongClaim",{type:"pong"});
+$("#mjKongBtn").onclick=()=>{const o=priv.mahjongOptions||{};if(state.mahjongReaction)sendMj("mahjongClaim",{type:"kong"});else if(o.concealedKongs?.length)sendMj("mahjongConcealedKong",{id:o.concealedKongs[0]})};
+$("#mjChowBtn").onclick=()=>{const cs=priv.mahjongOptions?.chows||[];if(!cs.length)return;if(cs.length===1)return sendMj("mahjongClaim",{type:"chow",ids:cs[0]});showChowChoices(cs)};
+$("#mjPassBtn").onclick=()=>sendMj("mahjongPass");
+function showChowChoices(cs){const modal=$("#chowModal"),box=$("#chowChoices");box.innerHTML=cs.map((ids,i)=>`<button class="chowChoice" data-i="${i}">${ids.map(id=>`<span><img src="tiles/${id}.svg"><small>${esc(MJ_NAMES[id]||id)}</small></span>`).join("")}</button>`).join("");modal.classList.remove("hidden");box.querySelectorAll(".chowChoice").forEach(b=>b.onclick=()=>{const pick=cs[+b.dataset.i];modal.classList.add("hidden");sendMj("mahjongClaim",{type:"chow",ids:pick})})}
+$("#chowCancel").onclick=()=>$("#chowModal").classList.add("hidden");
 $("#rulesBtn").onclick=()=>alert(rule(state.game));
 $("#leaveBtn").onclick=()=>{if(confirm("確定離開目前房間？")){socket.emit("leaveRoom",{code});sessionStorage.removeItem(tokenKey(code));sessionStorage.removeItem("cardhall_active");sessionStorage.removeItem("cardhall_room");sessionStorage.removeItem("cardhall_join_name");sessionStorage.removeItem("cardhall_pwd");setTimeout(()=>location.href="player.html",200)}};
 socket.on("needPassword",()=>$("#pwdWrap").classList.remove("hidden"));
 socket.on("errorMsg",toast);
+socket.on("kicked",()=>{alert("你已被主控踢出房間");localStorage.removeItem(persistentTokenKey(code,sessionStorage.getItem("cardhall_join_name")||$("#name").value));sessionStorage.removeItem(tokenKey(code));sessionStorage.removeItem("cardhall_active");sessionStorage.removeItem("cardhall_room");sessionStorage.removeItem("cardhall_join_name");sessionStorage.removeItem("cardhall_pwd");location.href="player.html"});
 socket.on("roomDeleted",()=>{alert("房間已被主控刪除");sessionStorage.removeItem(tokenKey(code));sessionStorage.removeItem("cardhall_active");sessionStorage.removeItem("cardhall_room");sessionStorage.removeItem("cardhall_join_name");sessionStorage.removeItem("cardhall_pwd");location.href="player.html"});
 socket.on("joined",x=>{code=x.code;myPid=x.pid;sessionStorage.setItem(tokenKey(code),x.reconnectToken);localStorage.setItem(persistentTokenKey(code,sessionStorage.getItem("cardhall_join_name")||$("#name").value),x.reconnectToken);sessionStorage.setItem("cardhall_active","1");$("#roomCode").textContent=code;$("#joinWrap").classList.add("hidden");$("#gameWrap").classList.remove("hidden");toast(x.reconnected?"已回到原座位":"已加入房間")});
-socket.on("privateState",p=>{priv=p;myPid=p.pid;if(sel.size&&![...sel].some(k=>p.hand?.some(c=>(c.uid||c.id)===k)))sel.clear();renderHand();renderButtons()});
+socket.on("privateState",p=>{priv=p;myPid=p.pid;mjBusy=false;if(sel.size&&![...sel].some(k=>p.hand?.some(c=>(c.uid||c.id)===k)))sel.clear();renderHand();renderButtons()});
 let lastHistLen=0;
-socket.on("roomState",s=>{if(state&&s.history.length>lastHistLen&&s.status==="playing")beep(s.game==="mahjong"?"tile":"card");lastHistLen=s.history.length;state=s;renderState()});
+socket.on("roomState",s=>{mjBusy=false;if(state&&s.history.length>lastHistLen&&s.status==="playing")beep(s.game==="mahjong"?"tile":"card");lastHistLen=s.history.length;state=s;renderState()});
 function syncSound(){$("#soundBtn")&&($("#soundBtn").textContent=soundOn?"🔊 聲音：開":"🔇 聲音：關")}
 function getAudio(){
  try{
@@ -107,7 +111,7 @@ socket.on("gameSound",e=>{
  else if(e.action==="win"){beep("countFinal");speak("胡")}
 });
 function renderState(){
- document.body.classList.toggle("game-mahjong",state.game==="mahjong");
+ for(const g of ["big2","sevens","chinese","landlord","mahjong"])document.body.classList.toggle("game-"+g,state.game===g);
  $("#gameName").textContent=state.gameName;$("#online").textContent=`${state.connectedCount}/${state.needPlayers}`;$("#round").textContent=`${state.round}/${state.totalRounds}`;
  $("#seats").innerHTML=Array.from({length:state.needPlayers},(_,i)=>state.players[i]?`<div class="pseat ${i===state.currentTurn?"turn":""} ${state.players[i].connected?"":"off"}">👤 ${esc(state.players[i].name)}<br><span class="statusdot">${state.players[i].connected?"🟢":"⚪ 斷線保留"}｜🏆 ${state.players[i].wins} 勝${state.status==="playing"?"｜剩 "+state.players[i].count:""}${state.players[i].covered?`｜蓋 ${state.players[i].covered}`:""}</span>${state.game==="mahjong"&&state.players[i].melds?.length?`<div class="meldMini">${state.players[i].melds.map(m=>m.tiles.map(t=>`<img src="tiles/${t.id}.svg">`).join("")).join("")}</div>`:""}</div>`:`<div class="pseat off">等待玩家</div>`).join("");
  $("#history").innerHTML=[...state.history].reverse().map(x=>`<div class="hist">${esc(x.text)}</div>`).join("");
@@ -124,7 +128,7 @@ function renderButtons(){
    sp.title=myTurn?(sel.size===1?"打出目前選取的牌":"先點一張牌"):"還沒輪到你";
  }else sp.disabled=false;
  const mb=[["#mjWinBtn",!!(o.selfWin||o.win)],["#mjPongBtn",!!o.pong],["#mjKongBtn",!!(o.kong||(o.concealedKongs||[]).length)],["#mjChowBtn",!!(o.chows||[]).length],["#mjPassBtn",!!o.canPass]];
- mb.forEach(([q,on])=>{const b=$(q);b.classList.toggle("hidden",!mj);b.disabled=!on;b.classList.toggle("mjReady",!!on)});
+ mb.forEach(([q,on])=>{const b=$(q);b.classList.toggle("hidden",!mj);b.disabled=!on||mjBusy;b.classList.toggle("mjReady",!!on&&!mjBusy)});
 
 }
 function renderBoard(){
@@ -135,7 +139,7 @@ function renderBoard(){
    b.innerHTML=bottom+`<div>${play}</div>`;
  }
  else if(state.game==="sevens"){let h="";for(const s of ["C","D","H","S"]){const a=state.board?.[s]||[];h+=`<div style="width:100%;display:flex;justify-content:center;align-items:center;gap:1px"><b style="width:20px">${s}</b>${a.map(c=>`<img class="cardOut" src="cards/${c.id}.svg">`).join("")}</div>`}b.innerHTML=h}
- else if(state.game==="mahjong")b.innerHTML=`${state.mahjongReaction?`<div class="reactionText">等待 吃／碰／槓／胡／過　${Math.max(0,Math.ceil((state.mahjongReaction.endsAt-Date.now())/1000))} 秒</div>`:""}<div class="discardGrid">${(state.board?.discards||[]).slice(-36).map(x=>`<img src="tiles/${x.tile.id}.svg">`).join("")}</div>`;
+ else if(state.game==="mahjong")b.innerHTML=`${state.mahjongReaction?`<div class="reactionText">等待可操作玩家選擇 吃／碰／槓／胡／過</div>`:""}<div class="discardGrid">${(state.board?.discards||[]).slice(-36).map(x=>`<img src="tiles/${x.tile.id}.svg">`).join("")}</div>`;
  else b.innerHTML="十三支：完成排牌後等待其他玩家";
 }
 function renderHand(){
@@ -168,12 +172,8 @@ function startTicker(){
        beep(n<=3?"countFinal":"count");
      }
    }else lastCountdownSecond=null;
-   if(state.status==="playing"&&state.turnEndsAt){
-     const n=Math.max(0,Math.ceil((state.turnEndsAt-Date.now())/1000));
-     $("#timer").textContent="⏱️ "+n;
-     if(state.players?.[state.currentTurn]?.pid===myPid&&n>0&&n<=3&&n!==lastTurnSecond){lastTurnSecond=n;beep("countFinal")}
-   }else{$("#timer").textContent="";lastTurnSecond=null}
+   $("#timer").textContent="";lastTurnSecond=null;
  },120)
 }
-function rule(g){if(g==="big2")return "大老二：3 最小、2 最大；花色 ♣<♦<♥<♠；持有 ♣3 者先出，第一手需含 ♣3。五張牌型：順子＜同花＜葫蘆＜鐵支＜同花順。可 PASS 時超時會自動 PASS；領出者超時會由系統出最小合法牌。";if(g==="sevens")return "牌七：持有 ♠7 者先出。每個花色從 7 往上或往下接；如果手上沒有任何合法牌，必須選一張蓋牌。手牌清空即獲勝。";if(g==="chinese")return "十三支：13 張分成前3、中5、後5。本版先用一鍵自動排牌完成多人流程。";if(g==="landlord")return "鬥地主公開測試：54 張（52 張＋小王＋大王）；3 人各 17 張，系統隨機地主後取得 3 張底牌。支援單張、對子、三條、三帶一、三帶二、順子、連對、無翅膀飛機、炸彈、王炸。2 與大小王不能放進順子／連對／飛機。";return "麻將：台灣 16 張。每人平常 16 張，摸牌後 17 張再打一張。支援吃、碰、明槓、暗槓、自摸、別人打出的牌胡牌與過；吃只能吃上家打出的牌。吃碰槓後會顯示在副露區。胡牌基本結構為五組面子＋一對將。"}
+function rule(g){if(g==="big2")return "大老二：3 最小、2 最大；花色 ♣<♦<♥<♠；持有 ♣3 者先出，第一手需含 ♣3。五張牌型：順子＜同花＜葫蘆＜鐵支＜同花順。沒有出牌倒數，輪到玩家時等待玩家自行操作。";if(g==="sevens")return "牌七：持有 ♠7 者先出。每個花色從 7 往上或往下接；如果手上沒有任何合法牌，必須選一張蓋牌。手牌清空即獲勝。";if(g==="chinese")return "十三支：13 張分成前3、中5、後5。本版先用一鍵自動排牌完成多人流程。";if(g==="landlord")return "鬥地主公開測試：54 張（52 張＋小王＋大王）；3 人各 17 張，系統隨機地主後取得 3 張底牌。支援單張、對子、三條、三帶一、三帶二、順子、連對、無翅膀飛機、炸彈、王炸。2 與大小王不能放進順子／連對／飛機。";return "麻將：台灣 16 張。每人平常 16 張，摸牌後 17 張再打一張。支援吃、碰、明槓、暗槓、自摸、別人打出的牌胡牌與過；吃只能吃上家打出的牌。吃碰槓後會顯示在副露區。胡牌基本結構為五組面子＋一對將。"}
 function esc(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
