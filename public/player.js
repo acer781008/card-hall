@@ -1,7 +1,7 @@
 
 const socket=io({reconnection:true,reconnectionAttempts:8,reconnectionDelay:500,reconnectionDelayMax:2500}),$=s=>document.querySelector(s);
 let code=null,state=null,priv={hand:[]},sel=new Set(),tick=null,soundOn=localStorage.getItem("cardhall_sound")!=="0",myPid=null;
-let audioCtx=null,audioUnlocked=false,lastCountdownSecond=null,lastTurnSecond=null,mjBusy=false;
+let audioCtx=null,audioUnlocked=false,lastCountdownSecond=null,lastTurnSecond=null,mjBusy=false,lastTurnPid=null,lastStatus=null;
 const qp=new URLSearchParams(location.search);if(qp.get("room")){$("#code").value=qp.get("room");$("#code").readOnly=true}
 $("#name").value=localStorage.getItem("cardhall_name")||"";syncSound();
 let joinedRoom=false;
@@ -67,9 +67,9 @@ function beep(kind="click"){
  const a=getAudio();if(!a||a.state!=="running")return;
  try{
    const o=a.createOscillator(),g=a.createGain();o.connect(g);g.connect(a.destination);
-   o.type=kind==="tile"?"square":"triangle";
-   const f=kind==="countFinal"?760:kind==="count"?520:kind==="tile"?430:340;
-   const dur=kind==="countFinal"?.13:kind==="count"?.075:kind==="tile"?.055:.06;
+   o.type=["tile","bomb"].includes(kind)?"square":"triangle";
+   const f=kind==="win"?820:kind==="bomb"?120:kind==="turn"?660:kind==="countFinal"?760:kind==="count"?520:kind==="tile"?430:kind==="cover"?250:kind==="pass"?300:kind==="submit"?560:kind==="card"?410:340;
+   const dur=kind==="win"?.22:kind==="bomb"?.18:kind==="turn"?.11:kind==="countFinal"?.13:kind==="count"?.075:kind==="tile"?.055:.07;
    o.frequency.setValueAtTime(f,a.currentTime);
    g.gain.setValueAtTime(.0001,a.currentTime);
    g.gain.exponentialRampToValueAtTime(kind==="countFinal"?.12:.07,a.currentTime+.008);
@@ -90,17 +90,45 @@ function speak(text){
  }catch{}
 }
 socket.on("gameSound",e=>{
- if(!soundOn)return;
- if(e?.game==="big2"){beep(e.action==="pass"?"click":"card");return}
- if(e?.game==="sevens"){beep(e.action==="cover"?"click":"card");return}
- if(e?.game!=="mahjong")return;
+ if(!soundOn||!e)return;
+ const suitName={C:"梅花",D:"方塊",H:"紅心",S:"黑桃"};
+ const rankName=r=>String(r||"").toUpperCase();
+ const cardVoice=c=>c?`${suitName[c.suit]||""}${rankName(c.rank)}`:"";
+ if(e.game==="big2"){
+   if(e.action==="pass"){beep("pass");return}
+   if(e.action==="win"){beep("win");speak(`${e.playerName||"玩家"}獲勝`);return}
+   beep("card");
+   const cs=e.cards||[];
+   if(e.type==="單張"&&cs[0])speak(cardVoice(cs[0]));
+   else if(e.type==="對子"&&cs[0])speak(`一對${rankName(cs[0].rank)}`);
+   else if(["順子","同花","葫蘆","鐵支","同花順"].includes(e.type))speak(e.type);
+   return;
+ }
+ if(e.game==="sevens"){
+   if(e.action==="cover"){beep("cover");return}
+   if(e.action==="win"){beep("win");speak(`${e.playerName||"玩家"}獲勝`);return}
+   beep("card");if(e.card)speak(cardVoice(e.card));return;
+ }
+ if(e.game==="chinese"){
+   if(e.action==="submit"){beep("submit");return}
+   if(e.action==="win"){beep("win");speak(`${e.playerName||"玩家"}獲勝`)}return;
+ }
+ if(e.game==="landlord"){
+   if(e.action==="pass"){beep("pass");return}
+   if(e.action==="win"){beep("win");speak(`${e.playerName||"玩家"}獲勝`);return}
+   beep(e.type==="炸彈"||e.type==="王炸"?"bomb":"card");return;
+ }
+ if(e.game!=="mahjong")return;
  if(e.action==="discard"){beep("tile");setTimeout(()=>speak(MJ_NAMES[e.tileId]||e.tileId),45)}
  else if(e.action==="chow"){beep("tile");speak("吃")}
  else if(e.action==="pong"){beep("tile");speak("碰")}
  else if(e.action==="kong"){beep("tile");speak("槓")}
- else if(e.action==="win"){beep("countFinal");speak("胡")}
+ else if(e.action==="win"){beep("win");speak("胡")}
 });
 function renderState(){
+ const turnPid=state?.status==="playing"&&state?.currentTurn!=null?state.players?.[state.currentTurn]?.pid:null;
+ if(soundOn&&turnPid===myPid&&(lastTurnPid!==myPid||lastStatus!=="playing"))beep("turn");
+ lastTurnPid=turnPid;lastStatus=state?.status;
  for(const g of ["big2","sevens","chinese","landlord","mahjong"])document.body.classList.toggle("game-"+g,state.game===g);
  $("#gameName").textContent=state.gameName;$("#online").textContent=`${state.connectedCount}/${state.needPlayers}`;$("#round").textContent=`${state.round}/${state.totalRounds}`;
  $("#seats").innerHTML=Array.from({length:state.needPlayers},(_,i)=>state.players[i]?`<div class="pseat ${i===state.currentTurn?"turn":""} ${state.players[i].connected?"":"off"}">👤 ${esc(state.players[i].name)}<br><span class="statusdot">${state.players[i].connected?"🟢":"⚪"}｜🏆 ${state.players[i].wins} 勝${state.status==="playing"?"｜剩 "+state.players[i].count:""}${state.players[i].covered?`｜蓋 ${state.players[i].covered}`:""}</span>${state.game==="mahjong"&&state.players[i].melds?.length?`<div class="meldMini">${state.players[i].melds.map(m=>m.tiles.map(t=>`<img src="tiles/${t.id}.svg">`).join("")).join("")}</div>`:""}</div>`:`<div class="pseat off">等待玩家</div>`).join("");

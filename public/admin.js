@@ -16,7 +16,7 @@ function startRoom(c){socket.emit("startRoom",{code:c})}
 function kickPlayer(c,pid){const r=window.rs.find(x=>x.code===c),p=r?.players.find(x=>x.pid===pid);if(confirm(`確定踢除 ${p?.name||"這位玩家"}？\n若遊戲進行中，本局會回到等待玩家。`))socket.emit("kickPlayer",{code:c,pid})}
 function delRoom(c){if(confirm("確定刪除房間 "+c+"？"))socket.emit("deleteRoom",{code:c})}
 function showRules(g){alert(rule(g))}
-function rule(g){if(g==="big2")return "大老二：3 最小、2 最大；花色 ♣<♦<♥<♠；♣3 持有者先出且第一手需含 ♣3；支援單張、對子、三條、順子、同花、葫蘆、鐵支、同花順。";if(g==="sevens")return "接龍：持有 ♠7 先出；同花色由 7 往上／往下接；若手上沒有任何合法牌，必須選一張蓋牌；全部玩家處理完手牌後，以蓋牌最少者獲勝。";if(g==="chinese")return "十三支：13 張分前3、中5、後5；可手動分成前3、中5、後5，也可套用推薦排法；後墩需 ≥ 中墩 ≥ 前墩。";if(g==="landlord")return "鬥地主：54 張（含大小王），3 人各 17 張＋地主 3 張底牌；目前地主由系統隨機。支援單張、對子、三條、三帶一／二、順子、連對、無翅膀飛機、炸彈、王炸。";return "麻將：台灣 16 張；每人平常 16 張，摸牌後 17 張再打一張；支援吃、碰、明槓、暗槓、自摸、放槍胡與過。吃只能吃上家；基本胡牌結構為五組面子＋一對將。目前未加入花牌補花。"}
+function rule(g){if(g==="big2")return "大老二：3 最小、2 最大；花色 ♣<♦<♥<♠；♣3 持有者先出且第一手需含 ♣3；支援單張、對子、順子、同花、葫蘆、鐵支、同花順；三張同點數不可單獨出牌。";if(g==="sevens")return "接龍：持有 ♠7 先出；同花色由 7 往上／往下接；若手上沒有任何合法牌，必須選一張蓋牌；全部玩家處理完手牌後，以蓋牌最少者獲勝。";if(g==="chinese")return "十三支：13 張分前3、中5、後5；可手動分成前3、中5、後5，也可套用推薦排法；後墩需 ≥ 中墩 ≥ 前墩。";if(g==="landlord")return "鬥地主：54 張（含大小王），3 人各 17 張＋地主 3 張底牌；目前地主由系統隨機。支援單張、對子、三條、三帶一／二、順子、連對、無翅膀飛機、炸彈、王炸。";return "麻將：台灣 16 張；每人平常 16 張，摸牌後 17 張再打一張；支援吃、碰、明槓、暗槓、自摸、放槍胡與過。吃只能吃上家；基本胡牌結構為五組面子＋一對將。目前未加入花牌補花。"}
 function fmt(s){return({waiting:"等待玩家",countdown:"倒數中",playing:"遊戲中",round_end:"回合結束",finished:"本場完成"})[s]||s}
 function esc(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
 
