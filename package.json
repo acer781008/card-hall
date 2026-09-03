@@ -1,8 +1,8 @@
 {
   "name": "multiplayer-card-hall",
-  "version": "2.0.6",
+  "version": "2.1.0",
   "private": true,
-  "description": "多人棋牌館 V2.0.6 斷線穩定、大老二雙玩法、接龍即時反應修正版",
+  "description": "多人棋牌館 V2.1.0 九款棋牌、出牌秒數、分享備註、AI 補位版",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
