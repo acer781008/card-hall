@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="180" height="252" viewBox="0 0 180 252">
+<rect x="3" y="3" width="174" height="246" rx="13" fill="#fff" stroke="#222" stroke-width="5"/>
+<text x="16" y="34" font-family="Arial,sans-serif" font-weight="900" font-size="22">J</text>
+<text x="90" y="116" text-anchor="middle" font-family="Arial,sans-serif" font-weight="900" font-size="28">JOKER</text>
+<text x="90" y="153" text-anchor="middle" font-family="sans-serif" font-weight="900" font-size="38">小王</text>
+<text x="164" y="221" text-anchor="end" font-family="Arial,sans-serif" font-weight="900" font-size="22" transform="rotate(180 164 221)">J</text>
+</svg>
