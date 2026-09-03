@@ -1,6 +1,6 @@
 {
   "name": "multiplayer-card-hall",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "private": true,
   "description": "多人棋牌館 V2.1.0 九款棋牌、出牌秒數、分享備註、AI 補位版",
   "main": "server.js",

@@ -15,7 +15,7 @@ function validAdminToken(token){const [body,sig]=String(token||"").split(".");if
 app.post("/api/admin-login",(req,res)=>{if(String(req.body?.password||"")!==ADMIN_PASSWORD)return res.status(401).json({ok:false});res.json({ok:true,token:adminTokenSign(Date.now()+12*60*60*1000)})});
 app.post("/api/admin-session",(req,res)=>res.json({ok:validAdminToken(req.body?.token)}));
 app.use(express.static(path.join(__dirname,"public")));
-app.get("/health",(req,res)=>res.json({ok:true,rooms:rooms.size,version:"2.1.0"}));
+app.get("/health",(req,res)=>res.json({ok:true,rooms:rooms.size,version:"2.1.1"}));
 
 const PORT=process.env.PORT||3000;
 const rooms=new Map();
@@ -72,13 +72,13 @@ function publicRoom(r){
  return {
   code:r.code, game:r.game, gameName:GAME_META[r.game].name, needPlayers:GAME_META[r.game].players,
   status:r.status, passwordRequired:!!r.password, autoStart:r.autoStart, startCountdown:r.startCountdown, big2Mode:r.big2Mode||"classic", shareNote:r.shareNote||"", aiMode:r.aiMode||"none", aiWaitSeconds:r.aiWaitSeconds||60, aiFillDeadline:r.aiFillDeadline||null,
-  turnSeconds:r.turnSeconds, betweenSeconds:r.betweenSeconds, totalRounds:r.totalRounds, continuous:r.continuous,
+  turnSeconds:r.turnSeconds, betweenSeconds:r.betweenSeconds, totalRounds:r.totalRounds, continuous:r.continuous, scoreEnabled:!!r.scoreEnabled, ninety9Mode:r.ninety9Mode||"basic",
   round:r.round, currentTurn:r.currentTurn, turnEndsAt:r.turnEndsAt||null, countdownEndsAt:r.countdownEndsAt||null,
   lastPlay:r.lastPlay?{playerPid:r.lastPlay.playerPid,cards:r.lastPlay.cards,type:r.lastPlay.type}:null,
   board:publicBoard(r)||null, history:r.history.slice(-12), matchResults:r.matchResults||[], winner:r.winner||null, ranking:r.ranking||null, testNote:r.testNote||"",
   mahjongReaction:r.mahjongReaction?{discarderPid:r.mahjongReaction.discarderPid,tile:r.mahjongReaction.tile,endsAt:r.mahjongReaction.endsAt}:null,
   connectedCount:countConnected(r),
-  players:r.players.map(p=>({pid:p.pid,name:p.name,count:p.hand?.length||0,wins:p.wins||0,role:p.role||null,connected:p.connected,covered:p.covered?.length||0,submitted:!!p.submitted,melds:p.melds||[],redScore:redScoreSafe(p),isBot:!!p.isBot}))
+  players:r.players.map(p=>({pid:p.pid,name:p.name,count:p.hand?.length||0,wins:p.wins||0,points:p.points||0,role:p.role||null,connected:p.connected,covered:p.covered?.length||0,submitted:!!p.submitted,melds:p.melds||[],redScore:redScoreSafe(p),isBot:!!p.isBot})), resultHands:r.resultHands||null
  };
 }
 function emitAdmins(ownerToken){
@@ -99,13 +99,14 @@ function createRoom(o={}){
   startCountdown:Math.max(3,Math.min(20,+o.startCountdown||5)),
   turnSeconds:[0,10,15,20,30,45,60].includes(+o.turnSeconds)?+o.turnSeconds:0,
   shareNote:String(o.shareNote||"").trim().slice(0,40),
+  scoreEnabled:o.scoreEnabled===true, ninety9Mode:game==="ninety9"&&o.ninety9Mode==="special"?"special":"basic",
   betweenSeconds:Math.max(3,Math.min(30,+o.betweenSeconds||8)),
   totalRounds:Math.max(1,Math.min(20,+o.totalRounds||4)),
   continuous:!!o.continuous,status:"waiting",round:0,currentTurn:null,
   big2Mode:game==="big2"?(o.big2Mode==="traditional"?"traditional":"classic"):null,
   aiMode:game==="mahjong"?"none":(["manual","auto"].includes(o.aiMode)?o.aiMode:"none"),aiWaitSeconds:Math.max(10,Math.min(600,+o.aiWaitSeconds||60)),aiFillTimer:null,aiFillDeadline:null,
   players:[],history:[],matchResults:[],board:null,lastPlay:null,passCount:0,firstPlay:true,
-  winner:null,ranking:null,countdownEndsAt:null,turnEndsAt:null,wall:[],
+  winner:null,ranking:null,resultHands:null,countdownEndsAt:null,turnEndsAt:null,wall:[],
   startTimer:null,turnTimer:null,nextTimer:null,reactionTimer:null,mahjongReaction:null,testNote:""
  };
 
@@ -116,7 +117,7 @@ function createRoom(o={}){
 
 function resetRoundState(r){
  clearAllTimers(r);r.board=null;r.lastPlay=null;r.passCount=0;r.firstPlay=true;r.winner=null;r.ranking=null;
- r.countdownEndsAt=null;r.turnEndsAt=null;r.currentTurn=null;
+ r.countdownEndsAt=null;r.turnEndsAt=null;r.currentTurn=null;r.resultHands=null;
  r.mahjongReaction=null;clearTimer(r,"reactionTimer");
  r.players.forEach(p=>{p.hand=[];p.covered=[];p.role=null;p.submitted=false;p.chinese=null;p.melds=[];p.drawnUid=null});
 }
@@ -153,18 +154,33 @@ function handleTurnTimeout(r){
  else if(r.game==="blackjack")blackjackAction(r,p,"stand",true);
  else if(r.game==="texas")texasAction(r,p,"continue",true);
 }
+function awardRoundPoints(r,winner){
+ if(!r.scoreEnabled)return;
+ const ranked=[winner,...r.players.filter(x=>x!==winner)];
+ const awards=[10,6,3,0];
+ if(r.game==="blackjack"){
+  const dv=bjVal(r.board?.dealer||[]);for(const x of r.players){const v=bjVal(x.hand||[]);const gain=v>21?0:(dv>21||v>dv?10:v===dv?5:0);x.points=(x.points||0)+gain}return;
+ }
+ if(r.game==="landlord"){
+  const landlord=r.players.find(x=>x.role==="地主");if(!landlord)return;const landlordWon=winner===landlord;for(const x of r.players)x.points=(x.points||0)+(landlordWon?(x===landlord?10:0):(x===landlord?0:10));return;
+ }
+ ranked.forEach((x,i)=>x.points=(x.points||0)+(awards[i]||0));
+}
+function makeResultHands(r){
+ if(r.game==="texas")return r.players.filter(x=>!x.folded).map(x=>({pid:x.pid,name:x.name,cards:x.hand||[],folded:!!x.folded,type:texasType(bestTexas([...(x.hand||[]),...(r.board?.community||[])]))}));
+ if(r.game==="blackjack")return r.players.map(x=>({pid:x.pid,name:x.name,cards:x.hand||[],value:bjVal(x.hand||[]),bust:bjVal(x.hand||[])>21}));
+ if(["big2","sevens","ninety9","redpoint"].includes(r.game))return r.players.map(x=>({pid:x.pid,name:x.name,cards:x.hand||[]}));
+ return null;
+}
 function finishRound(r,p){
- clearTimer(r,"turnTimer");r.turnEndsAt=null;p.wins=(p.wins||0)+1;r.winner={pid:p.pid,name:p.name};r.status="round_end";
- r.matchResults=r.matchResults||[];r.matchResults.push({round:r.round,winner:p.name,at:Date.now(),players:r.players.map(x=>({name:x.name,wins:x.wins||0,covered:(x.covered||[]).length}))});
- hist(r,`🏆 第 ${r.round} 回合：${p.name} 獲勝`);
- io.to("room:"+r.code).emit("gameSound",{game:r.game,action:"win",playerName:p.name});
- const sorted=[...r.players].sort((a,b)=>(b.wins||0)-(a.wins||0)||a.name.localeCompare(b.name,"zh-Hant"));
- let rank=0,last=null; r.ranking=sorted.map((x,i)=>{if(last===null||x.wins!==last)rank=i+1;last=x.wins;return{rank,name:x.name,wins:x.wins}});
+ clearTimer(r,"turnTimer");r.turnEndsAt=null;p.wins=(p.wins||0)+1;r.winner={pid:p.pid,name:p.name};r.status="round_end";r.resultHands=makeResultHands(r);awardRoundPoints(r,p);
+ r.matchResults=r.matchResults||[];r.matchResults.push({round:r.round,winner:p.name,at:Date.now(),players:r.players.map(x=>({name:x.name,wins:x.wins||0,points:x.points||0,covered:(x.covered||[]).length}))});
+ hist(r,`🏆 第 ${r.round} 回合：${p.name} 獲勝`);io.to("room:"+r.code).emit("gameSound",{game:r.game,action:"win",playerName:p.name});
+ const sorted=[...r.players].sort((a,b)=>(b.points||0)-(a.points||0)||(b.wins||0)-(a.wins||0)||a.name.localeCompare(b.name,"zh-Hant"));
+ let rank=0,last=null;r.ranking=sorted.map((x,i)=>{const key=r.scoreEnabled?x.points:x.wins;if(last===null||key!==last)rank=i+1;last=key;return{rank,name:x.name,wins:x.wins||0,points:x.points||0}});
  emitRoom(r);
- if(r.round>=r.totalRounds){
-  r.status="finished";emitRoom(r);
-  if(r.continuous)r.nextTimer=setTimeout(()=>{r.players.forEach(x=>x.wins=0);r.round=0;r.status="waiting";r.winner=null;r.ranking=null;hist(r,"新一場開始等待");emitRoom(r);maybeStart(r)},r.betweenSeconds*1000);
- }else r.nextTimer=setTimeout(()=>startRound(r),r.betweenSeconds*1000);
+ if(r.round>=r.totalRounds){r.status="finished";emitRoom(r);if(r.continuous)r.nextTimer=setTimeout(()=>{r.players.forEach(x=>{x.wins=0;x.points=0});r.round=0;r.status="waiting";r.winner=null;r.ranking=null;hist(r,"新一場開始等待");emitRoom(r);maybeStart(r)},r.betweenSeconds*1000)}
+ else r.nextTimer=setTimeout(()=>startRound(r),r.betweenSeconds*1000);
 }
 function startRound(r){
  resetRoundState(r);r.round++;r.status="playing";hist(r,`第 ${r.round}/${r.totalRounds} 回合開始`);
@@ -466,11 +482,24 @@ function timeoutTurn(r){
 
 
 
-function setup99(r){const d=shuffle(deck52());r.board={total:0,deck:d,lastCard:null};for(const p of r.players)p.hand=sortCards(r.board.deck.splice(0,5));r.currentTurn=0;scheduleTurn(r)}
+function setup99(r){const d=shuffle(deck52());r.board={total:0,deck:d,lastCard:null,direction:1};for(const p of r.players)p.hand=sortCards(r.board.deck.splice(0,5));r.currentTurn=0;scheduleTurn(r)}
 function val99(c){if(c.rank==="A")return 1;if(["J","Q","K"].includes(c.rank))return 10;return +c.rank}
-function play99(r,p,id,auto=false){if(r.players[r.currentTurn]!==p)return false;const c=p.hand.find(x=>x.id===id);if(!c)return false;const v=val99(c);if(r.board.total+v>99)return false;p.hand=p.hand.filter(x=>x.id!==id);r.board.total+=v;r.board.lastCard=c;if(r.board.deck.length)p.hand.push(r.board.deck.shift());hist(r,`${p.name}${auto?"（系統）":""} 出 ${c.id}｜總點數 ${r.board.total}`);if(!p.hand.length&&!r.board.deck.length)return finishRound(r,p),true;r.currentTurn=(r.currentTurn+1)%r.players.length;scheduleTurn(r);return true}
-function bot99(r,p){const c=p.hand.find(c=>r.board.total+val99(c)<=99);if(c)return play99(r,p,c.id,true);const winner=r.players[(r.currentTurn+r.players.length-1)%r.players.length];finishRound(r,winner);return true}
-
+function next99Index(r,from,steps=1){let i=from;for(let n=0;n<steps;n++)i=(i+(r.board.direction||1)+r.players.length)%r.players.length;return i}
+function play99(r,p,id,choice=null,targetPid=null,auto=false){
+ if(r.players[r.currentTurn]!==p)return false;const c=p.hand.find(x=>x.id===id);if(!c)return false;let total=r.board.total,ni=null,desc="";
+ if(r.ninety9Mode==="special"){
+  if(c.rank==="4"){r.board.direction=(r.board.direction||1)*-1;desc="迴轉"}
+  else if(c.rank==="5"){const ti=r.players.findIndex(x=>x.pid===targetPid&&x.pid!==p.pid);if(ti<0)return false;ni=ti;desc=`指定 ${r.players[ti].name}`}
+  else if(c.rank==="10"){const d=choice==="minus"?-10:choice==="plus"?10:null;if(d===null||total+d<0||total+d>99)return false;total+=d;desc=d>0?"+10":"-10"}
+  else if(c.rank==="J"){desc="PASS"}
+  else if(c.rank==="Q"){const d=choice==="minus"?-20:choice==="plus"?20:null;if(d===null||total+d<0||total+d>99)return false;total+=d;desc=d>0?"+20":"-20"}
+  else if(c.rank==="K"){total=99;desc="直接 99"}
+  else {const v=val99(c);if(total+v>99)return false;total+=v;desc=`+${v}`}
+ }else{const v=val99(c);if(total+v>99)return false;total+=v;desc=`+${v}`}
+ p.hand=p.hand.filter(x=>x.id!==id);r.board.total=total;r.board.lastCard=c;if(r.board.deck.length)p.hand.push(r.board.deck.shift());hist(r,`${p.name}${auto?"（系統）":""} 出 ${c.id}｜${desc}｜總點數 ${total}`);
+ if(!p.hand.length&&!r.board.deck.length)return finishRound(r,p),true;r.currentTurn=ni??next99Index(r,r.currentTurn);scheduleTurn(r);return true;
+}
+function bot99(r,p){const h=[...p.hand];if(r.ninety9Mode==="special"){for(const c of h){if(c.rank==="5"){const t=r.players.find(x=>x!==p);if(t&&play99(r,p,c.id,null,t.pid,true))return true}else if(["10","Q"].includes(c.rank)){if(play99(r,p,c.id,"minus",null,true)||play99(r,p,c.id,"plus",null,true))return true}else if(play99(r,p,c.id,null,null,true))return true}}else{const c=h.find(c=>r.board.total+val99(c)<=99);if(c)return play99(r,p,c.id,null,null,true)}const pi=(r.currentTurn-(r.board.direction||1)+r.players.length)%r.players.length;const winner=r.players[pi];finishRound(r,winner||r.players[0]);return true}
 function setupRedPoint(r){const d=shuffle(deck52());r.board={table:d.splice(0,8),deck:d,captures:{}};for(const p of r.players){p.hand=sortCards(r.board.deck.splice(0,6));p.captured=[]}r.currentTurn=0;scheduleTurn(r)}
 function redScore(cards){return (cards||[]).reduce((n,c)=>n+(c.suit==="H"||c.suit==="D"?1:0),0)}
 function redTake(r,p,c){const i=r.board.table.findIndex(x=>x.rank===c.rank);if(i>=0){p.captured.push(c,r.board.table.splice(i,1)[0])}else r.board.table.push(c)}
@@ -485,12 +514,13 @@ function botBlackjack(r,p){return blackjackAction(r,p,bjVal(p.hand)<17?"hit":"st
 
 function poker5(cards){const rs=cards.map(c=>c.rv).sort((a,b)=>a-b),cnt={};rs.forEach(x=>cnt[x]=(cnt[x]||0)+1);const vals=Object.entries(cnt).map(([r,n])=>[+n,+r]).sort((a,b)=>b[0]-a[0]||b[1]-a[1]);const flush=cards.every(c=>c.suit===cards[0].suit),u=[...new Set(rs)],straight=u.length===5&&u[4]-u[0]===4;return [straight&&flush?8:vals[0][0]===4?7:vals[0][0]===3&&vals[1]?.[0]===2?6:flush?5:straight?4:vals[0][0]===3?3:vals[0][0]===2&&vals[1]?.[0]===2?2:vals[0][0]===2?1:0,...vals.flat()]}
 function bestTexas(cards){let best=null;for(const c of comb(cards,5)){const s=poker5(c);if(!best||cmp(s,best)>0)best=s}return best}
+function texasType(s){return ["高牌","一對","兩對","三條","順子","同花","葫蘆","鐵支","同花順"][s?.[0]||0]||"高牌"}
 function setupTexas(r){const d=shuffle(deck52());for(const p of r.players){p.hand=[d.pop(),d.pop()];p.folded=false}r.board={community:[d.pop(),d.pop(),d.pop(),d.pop(),d.pop()],stage:0};r.currentTurn=0;scheduleTurn(r)}
 function texasAction(r,p,act,auto=false){if(r.players[r.currentTurn]!==p||p.folded)return false;if(act==="fold"){p.folded=true;hist(r,`${p.name}${auto?"（系統）":""} 棄牌`)}else if(act==="continue")hist(r,`${p.name}${auto?"（系統）":""} 繼續`);else return false;const alive=r.players.filter(x=>!x.folded);if(alive.length===1)return finishRound(r,alive[0]),true;let i=r.currentTurn,g=0;do{i=(i+1)%r.players.length;g++}while(r.players[i].folded&&g<r.players.length);if(i<=r.currentTurn){r.board.stage++;if(r.board.stage>=3){const w=[...alive].sort((a,b)=>cmp(bestTexas([...b.hand,...r.board.community]),bestTexas([...a.hand,...r.board.community])))[0];return finishRound(r,w),true}}r.currentTurn=i;scheduleTurn(r);return true}
 function botTexas(r,p){return texasAction(r,p,Math.random()<.12?"fold":"continue",true)}
 
 function botName(r){let i=1,n;do n=`電腦${i++}`;while(r.players.some(p=>p.name===n));return n}
-function addBot(r){if(r.game==="mahjong"||r.players.length>=GAME_META[r.game].players||!["waiting","countdown"].includes(r.status))return false;const p={pid:uid(),name:botName(r),socketId:null,connected:true,isBot:true,hand:[],covered:[],wins:0,role:null,submitted:false,melds:[],drawnUid:null};r.players.push(p);hist(r,`🤖 ${p.name} 加入房間`);emitRoom(r);maybeStart(r);return true}
+function addBot(r){if(r.game==="mahjong"||r.players.length>=GAME_META[r.game].players||!["waiting","countdown"].includes(r.status))return false;const p={pid:uid(),name:botName(r),socketId:null,connected:true,isBot:true,hand:[],covered:[],wins:0,points:0,role:null,submitted:false,melds:[],drawnUid:null};r.players.push(p);hist(r,`🤖 ${p.name} 加入房間`);emitRoom(r);maybeStart(r);return true}
 function fillBots(r){if(!r||r.game==="mahjong"||!["waiting","countdown"].includes(r.status))return 0;let n=0;while(r.players.length<GAME_META[r.game].players){if(!addBot(r))break;n++}return n}
 function scheduleAiFill(r){if(!r||r.aiMode!=="auto"||r.game==="mahjong"||r.aiFillTimer||!["waiting","countdown"].includes(r.status))return;if(!r.players.some(p=>!p.isBot))return;if(r.players.length>=GAME_META[r.game].players)return;r.aiFillDeadline=Date.now()+r.aiWaitSeconds*1000;r.aiFillTimer=setTimeout(()=>{r.aiFillTimer=null;r.aiFillDeadline=null;if(!rooms.has(r.code)||r.aiMode!=="auto"||!["waiting","countdown"].includes(r.status))return;const n=fillBots(r);if(n)hist(r,`🤖 等待時間到，自動補入 ${n} 位電腦玩家`);emitRoom(r)},r.aiWaitSeconds*1000);emitRoom(r)}
 function big2BotChoice(r,p){const hand=[...p.hand];for(const c of hand)if(playBig2(r,p,[c.id],true))return true;for(let i=0;i<hand.length;i++)for(let j=i+1;j<hand.length;j++)if(playBig2(r,p,[hand[i].id,hand[j].id],true))return true;if(r.big2Mode==="traditional")for(const ids of comb(hand,3).map(x=>x.map(c=>c.id)))if(playBig2(r,p,ids,true))return true;for(const ids of comb(hand,5).map(x=>x.map(c=>c.id)))if(playBig2(r,p,ids,true))return true;return passBig2(r,p,true)}
@@ -540,11 +570,12 @@ io.on("connection",socket=>{
   if(r.players.some(x=>x.name.toLowerCase()===name.toLowerCase()))return socket.emit("errorMsg","此玩家名稱已有人使用");
   const need=GAME_META[r.game].players;
   if(r.players.length>=need){const bi=r.players.findIndex(x=>x.isBot);if(bi>=0&&["waiting","countdown"].includes(r.status)){const b=r.players.splice(bi,1)[0];hist(r,`👤 真人玩家加入，${b.name} 自動讓位`)}else return socket.emit("errorMsg","房間已滿")}
-  const p={pid:uid(),name,socketId:socket.id,connected:true,hand:[],covered:[],wins:0,role:null,submitted:false,melds:[],drawnUid:null};
+  const p={pid:uid(),name,socketId:socket.id,connected:true,hand:[],covered:[],wins:0,points:0,role:null,submitted:false,melds:[],drawnUid:null};
   r.players.push(p);socket.data={code:r.code,pid:p.pid};socket.join("room:"+r.code);hist(r,`${p.name} 加入房間`);
   socket.emit("joined",{code:r.code,pid:p.pid});emitRoom(r);scheduleAiFill(r);maybeStart(r);
  });
- socket.on("playCards",({code,ids})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p)return;let ok=r.game==="big2"?playBig2(r,p,ids||[]):r.game==="landlord"?playDDZ(r,p,ids||[]):r.game==="ninety9"?play99(r,p,(ids||[])[0]):r.game==="redpoint"?playRedPoint(r,p,(ids||[])[0]):false;if(!ok)socket.emit("errorMsg","這手牌目前不能出")});
+ socket.on("playCards",({code,ids})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p)return;let ok=r.game==="big2"?playBig2(r,p,ids||[]):r.game==="landlord"?playDDZ(r,p,ids||[]):r.game==="ninety9"?play99(r,p,(ids||[])[0],null,null):r.game==="redpoint"?playRedPoint(r,p,(ids||[])[0]):false;if(!ok)socket.emit("errorMsg","這手牌目前不能出")});
+ socket.on("ninety9Action",({code,id,choice,targetPid})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p||r.game!=="ninety9")return;if(!play99(r,p,id,choice||null,targetPid||null))socket.emit("errorMsg","這張牌目前不能這樣出")});
  socket.on("pass",({code})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p)return;const ok=r.game==="big2"?passBig2(r,p):r.game==="landlord"?passDDZ(r,p):false;if(!ok)socket.emit("errorMsg","現在不能 PASS")});
  socket.on("sevenAction",({code,id,cover})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p||r.game!=="sevens")return;if(!playSeven(r,p,id,!!cover))socket.emit("errorMsg",cover?"你還有合法牌可出，不能蓋牌":"這張牌目前不能出")});
  socket.on("submitChinese",({code,front=[],middle=[],back=[]})=>{const r=rooms.get(code),p=r?.players.find(x=>x.pid===socket.data?.pid);if(!r||!p||r.game!=="chinese"||p.submitted)return;
