@@ -133,7 +133,7 @@ function renderState(){
  $("#gameName").textContent=state.gameName;$("#online").textContent=`${state.connectedCount}/${state.needPlayers}`;$("#round").textContent=`${state.round}/${state.totalRounds}`;
  $("#seats").innerHTML=Array.from({length:state.needPlayers},(_,i)=>state.players[i]?`<div class="pseat ${i===state.currentTurn?"turn":""} ${state.players[i].connected?"":"off"}">👤 ${esc(state.players[i].name)}<br><span class="statusdot">${state.players[i].connected?"🟢":"⚪"}｜🏆 ${state.players[i].wins} 勝${state.status==="playing"?"｜剩 "+state.players[i].count:""}${state.players[i].covered?`｜蓋 ${state.players[i].covered}`:""}</span>${state.game==="mahjong"&&state.players[i].melds?.length?`<div class="meldMini">${state.players[i].melds.map(m=>m.tiles.map(t=>`<img src="tiles/${t.id}.svg">`).join("")).join("")}</div>`:""}</div>`:`<div class="pseat off">等待玩家</div>`).join("");
  $("#history").innerHTML=[...state.history].reverse().map(x=>`<div class="hist">${esc(x.text)}</div>`).join("");
- if(state.status==="waiting")$("#turnText").textContent=`等待玩家（${state.connectedCount}/${state.needPlayers}）`;else if(state.status==="countdown")$("#turnText").textContent="準備開始";else if(state.status==="playing"){if(state.game==="chinese")$("#turnText").textContent="請完成本回合排牌";else{const p=state.players[state.currentTurn];$("#turnText").textContent=p?(p.pid===myPid?"⬇ 輪到你":"輪到："+p.name):""}}else $("#turnText").textContent="本回合結束";
+ if(state.status==="waiting"){const ai=state.aiMode==="auto"&&state.aiFillDeadline?`｜🤖 <span id="aiWaitText"></span>`:"";$("#turnText").innerHTML=`等待玩家（${state.connectedCount}/${state.needPlayers}）${ai}`}else if(state.status==="countdown")$("#turnText").textContent="準備開始";else if(state.status==="playing"){if(state.game==="chinese")$("#turnText").textContent="請完成本回合排牌";else{const p=state.players[state.currentTurn];$("#turnText").textContent=p?(p.pid===myPid?"⬇ 輪到你":"輪到："+p.name):""}}else $("#turnText").textContent="本回合結束";
  $("#countdown").classList.toggle("hidden",state.status!=="countdown");renderBoard();renderButtons();renderResult();startTicker();
 }
 function isMyTurn(){return !!(state&&state.status==="playing"&&state.players?.[state.currentTurn]?.pid===myPid)}
@@ -192,9 +192,17 @@ function renderHand(){
    const canPick=state?.game==="chinese"||isMyTurn();
    el.classList.toggle("handLocked",!canPick&&["big2","sevens","landlord"].includes(state?.game));
    el.innerHTML=h.map((c,i)=>`<img class="card ${sel.has(c.id)?"sel":""} ${state?.game==="sevens"&&sevenLegalClient(c)?"legal":""} ${state?.game==="sevens"&&(i===0||h[i-1].suit!==c.suit)?"suitStart":""} ${!canPick&&["big2","sevens","landlord"].includes(state?.game)?"locked":""}" data-id="${c.id}" data-suit="${c.suit}" src="cards/${c.id}.svg">`).join("");
-   el.querySelectorAll(".card").forEach(x=>x.onclick=()=>{if(!canPick)return;const id=x.dataset.id;sel.has(id)?sel.delete(id):sel.add(id);renderHand();renderButtons()})
+   el.querySelectorAll(".card").forEach(x=>x.onclick=()=>{if(!canPick)return;const id=x.dataset.id;sel.has(id)?sel.delete(id):sel.add(id);renderHand();renderButtons()});
+   fitBig2PortraitHand(el,h.length);
  }
 }
+function fitBig2PortraitHand(el,count){
+ if(state?.game!=="big2"||!matchMedia("(max-width:600px) and (orientation:portrait)").matches||!count){el.style.removeProperty("--big2-card-margin");return}
+ const w=62,avail=Math.max(250,el.clientWidth-12);
+ let margin=0;if(count>1){const step=(avail-w)/(count-1);margin=Math.min(0,Math.max(-39,step-w))}
+ el.style.setProperty("--big2-card-margin",`${margin}px`);
+}
+window.addEventListener("resize",()=>{if(state?.game==="big2")fitBig2PortraitHand($("#hand"),(priv.hand||[]).length)});
 function renderResult(){if(["round_end","finished"].includes(state.status)&&state.winner){$("#result").classList.remove("hidden");$("#resultTitle").textContent=state.status==="finished"?"本場結束":"回合結束";$("#winnerText").innerHTML=`<h2>${esc(state.winner.name)} 獲勝</h2>`;$("#ranking").innerHTML=(state.ranking||[]).map(x=>`<div class="rankrow"><span>${x.rank}. ${esc(x.name)}</span><b>🏆 ${x.wins} 勝</b></div>`).join("");$("#nextText").textContent=state.status==="round_end"?`約 ${state.betweenSeconds} 秒後進入下一回合`:(state.continuous?`約 ${state.betweenSeconds} 秒後開始新一場`:"")}else $("#result").classList.add("hidden")}
 function startTicker(){
  if(tick)clearInterval(tick);
@@ -209,6 +217,7 @@ function startTicker(){
        beep(n<=3?"countFinal":"count");
      }
    }else lastCountdownSecond=null;
+   const aiEl=$("#aiWaitText");if(aiEl&&state.aiFillDeadline){const n=Math.max(0,Math.ceil((state.aiFillDeadline-Date.now())/1000));aiEl.textContent=n>0?`還有 ${n} 秒，未滿將自動補齊 AI`:`正在補齊 AI…`;}
    $("#timer").textContent="";lastTurnSecond=null;
  },120)
 }

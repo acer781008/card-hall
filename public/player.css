@@ -376,3 +376,39 @@ body.game-big2 .board img.cardOut{margin:0!important}
  body.game-big2 .card:first-child{margin-left:0!important}
  body.game-big2 .card.sel{transform:translateY(-16px)!important}
 }
+
+
+/* V2.0.5 手機直式：單畫面操作、完整手牌重疊顯示、AI 等待提示 */
+@media(max-width:600px) and (orientation:portrait){
+ .wrap{padding:4px!important;max-width:none!important}
+ .topbar{gap:4px!important;padding:5px!important;border-width:2px!important;border-radius:10px 10px 0 0!important;font-size:11px!important;justify-content:flex-start!important}
+ .topbar>b{font-size:13px!important;margin-right:3px!important}
+ .topbar>span{font-size:10px!important;white-space:nowrap!important}
+ .topbar>.btn{min-width:0!important;padding:6px 7px!important;font-size:10px!important;border-radius:8px!important;box-shadow:inset 0 -2px #0003,0 2px 4px #0003!important}
+ .wood{padding:5px!important;border-radius:0 0 14px 14px!important}
+ body.game-big2 .felt{height:calc(100dvh - 118px)!important;min-height:560px!important;border-width:3px!important;border-radius:14px!important}
+ body.game-big2 .seatsP{grid-template-columns:repeat(2,1fr)!important;gap:2px!important;padding:3px!important}
+ body.game-big2 .pseat{min-height:31px!important;padding:2px 3px!important;font-size:10px!important;line-height:1.02!important;border-radius:6px!important}
+ body.game-big2 .statusdot{font-size:8px!important}
+ body.game-big2 .history{position:absolute!important;left:5px!important;right:5px!important;top:69px!important;width:auto!important;height:51px!important;max-height:51px!important;margin:0!important;padding:4px 6px!important;font-size:8px!important;overflow:hidden!important}
+ body.game-big2 .history>b{font-size:9px!important}
+ body.game-big2 .history .hist:nth-child(n+3){display:none!important}
+ body.game-big2 .center{top:38%!important;width:96%!important}
+ body.game-big2 .turnText{font-size:16px!important;line-height:1.08!important;min-height:20px!important}
+ body.game-big2 .board{min-height:112px!important}
+ body.game-big2 .board img.cardOut{width:62px!important}
+ body.game-big2 .bottom{bottom:2px!important}
+ body.game-big2 .buttons{gap:4px!important;margin:0 0 1px!important;flex-wrap:nowrap!important}
+ body.game-big2 .buttons .btn{min-width:68px!important;padding:7px 8px!important;font-size:11px!important;border-radius:9px!important}
+ body.game-big2 .hand{width:100%!important;min-height:126px!important;padding:12px 4px 2px!important;overflow:visible!important;justify-content:flex-start!important;touch-action:manipulation!important}
+ body.game-big2 .hand .card{width:62px!important;flex:0 0 62px!important;margin-left:var(--big2-card-margin,-31px)!important;position:relative!important}
+ body.game-big2 .hand .card:first-child{margin-left:0!important}
+ body.game-big2 .hand .card.sel{transform:translateY(-15px)!important}
+}
+@media(max-width:380px) and (orientation:portrait){
+ body.game-big2 .felt{height:calc(100dvh - 112px)!important;min-height:525px!important}
+ body.game-big2 .board img.cardOut{width:56px!important}
+ body.game-big2 .center{top:37%!important}
+ body.game-big2 .hand .card{width:58px!important;flex-basis:58px!important}
+ body.game-big2 .hand{min-height:118px!important}
+}
