@@ -14,10 +14,11 @@ const adminSessions=new Set();
 app.post("/api/admin-login",(req,res)=>{if(String(req.body?.password||"")!==ADMIN_PASSWORD)return res.status(401).json({ok:false});const token=crypto.randomBytes(24).toString("hex");adminSessions.add(token);setTimeout(()=>adminSessions.delete(token),12*60*60*1000);res.json({ok:true,token})});
 app.post("/api/admin-session",(req,res)=>res.json({ok:adminSessions.has(String(req.body?.token||""))}));
 app.use(express.static(path.join(__dirname,"public")));
-app.get("/health",(req,res)=>res.json({ok:true,rooms:rooms.size,version:"2.0.0"}));
+app.get("/health",(req,res)=>res.json({ok:true,rooms:rooms.size,version:"2.0.2"}));
 
 const PORT=process.env.PORT||3000;
 const rooms=new Map();
+const roomArchives=new Map();
 
 const GAME_META={
   big2:{name:"大老二",players:4},
@@ -49,7 +50,9 @@ function pname(r,pid){return r.players.find(p=>p.pid===pid)?.name||"玩家"}
 function hist(r,text){r.history.push({t:Date.now(),text});if(r.history.length>40)r.history.shift()}
 function clearTimer(r,k){if(r[k])clearTimeout(r[k]);r[k]=null}
 function clearAllTimers(r){["startTimer","turnTimer","nextTimer"].forEach(k=>clearTimer(r,k))}
-function countConnected(r){return r.players.filter(p=>p.connected).length}
+function countConnected(r){return r.players.filter(p=>p.connected||p.isBot).length}
+function archiveRoom(r){const a=roomArchives.get(r.code)||{code:r.code,game:r.game,gameName:GAME_META[r.game]?.name||r.game,createdAt:r.createdAt||Date.now(),lastActiveAt:Date.now(),players:[],rounds:0,results:[],ownerToken:r.ownerToken,status:r.status};a.lastActiveAt=Date.now();a.status=r.status;a.players=[...new Set([...(a.players||[]),...r.players.map(p=>p.name)])];a.rounds=Math.max(a.rounds||0,r.round||0);a.results=[...(r.matchResults||[])];roomArchives.set(r.code,a)}
+function emitArchives(owner){if(!owner)return;io.to("admin:"+owner).emit("roomArchives",[...roomArchives.values()].filter(a=>a.ownerToken===owner).sort((a,b)=>b.createdAt-a.createdAt))}
 
 function publicRoom(r){
  return {
@@ -61,7 +64,7 @@ function publicRoom(r){
   board:r.board||null, history:r.history.slice(-12), matchResults:r.matchResults||[], winner:r.winner||null, ranking:r.ranking||null, testNote:r.testNote||"",
   mahjongReaction:r.mahjongReaction?{discarderPid:r.mahjongReaction.discarderPid,tile:r.mahjongReaction.tile,endsAt:r.mahjongReaction.endsAt}:null,
   connectedCount:countConnected(r),
-  players:r.players.map(p=>({pid:p.pid,name:p.name,count:p.hand?.length||0,wins:p.wins||0,role:p.role||null,connected:p.connected,covered:p.covered?.length||0,submitted:!!p.submitted,melds:p.melds||[]}))
+  players:r.players.map(p=>({pid:p.pid,name:p.name,count:p.hand?.length||0,wins:p.wins||0,role:p.role||null,connected:p.connected,covered:p.covered?.length||0,submitted:!!p.submitted,melds:p.melds||[],isBot:!!p.isBot}))
  };
 }
 function emitAdmins(ownerToken){
@@ -73,12 +76,12 @@ function emitRoom(r){
  for(const p of r.players){
   if(p.socketId) io.to(p.socketId).emit("privateState",{pid:p.pid,hand:p.hand||[],role:p.role||null,submitted:!!p.submitted,melds:p.melds||[],drawnUid:p.drawnUid||null,mahjongOptions:mahjongOptionsFor(r,p),chineseRecommendations:(r.game==="chinese"&&r.status==="playing"&&!p.submitted)?(p.chineseRecommendations||(p.chineseRecommendations=chineseRecommend(p.hand))):[]});
  }
- emitAdmins(r.ownerToken);
+ archiveRoom(r);emitAdmins(r.ownerToken);
 }
 function createRoom(o={}){
  const game=GAME_META[o.game]?o.game:"big2", code=roomCode();
  const r={
-  code,game,ownerToken:String(o.ownerToken||""),password:String(o.password||"").slice(0,16),autoStart:o.autoStart!==false,
+  code,game,createdAt:Date.now(),ownerToken:String(o.ownerToken||""),password:String(o.password||"").slice(0,16),autoStart:o.autoStart!==false,
   startCountdown:Math.max(3,Math.min(20,+o.startCountdown||5)),
   turnSeconds:0,
   betweenSeconds:Math.max(3,Math.min(30,+o.betweenSeconds||8)),
@@ -91,7 +94,7 @@ function createRoom(o={}){
 
  if(game==="landlord")r.testNote="鬥地主公開測試：54 張（含大小王）、3 人各 17 張＋地主 3 張底牌；支援王炸、炸彈、順子、連對、三帶一／二、無翅膀飛機。地主目前由系統隨機。";
  if(game==="mahjong")r.testNote="麻將：台灣 16 張；支援吃、碰、明槓、暗槓、自摸、放槍胡、過與副露區。";
- rooms.set(code,r);return r;
+ rooms.set(code,r);archiveRoom(r);return r;
 }
 
 function resetRoundState(r){
@@ -118,6 +121,7 @@ function manualStart(r){
 }
 function scheduleTurn(r){
  clearTimer(r,"turnTimer");r.turnEndsAt=null;emitRoom(r);
+ if(r.status==="playing"&&r.game!=="mahjong")setTimeout(()=>maybeBotMove(r),500+Math.floor(Math.random()*500));
 }
 function finishRound(r,p){
  clearTimer(r,"turnTimer");r.turnEndsAt=null;p.wins=(p.wins||0)+1;r.winner={pid:p.pid,name:p.name};r.status="round_end";
@@ -139,7 +143,7 @@ function startRound(r){
  else if(r.game==="chinese")setupChinese(r);
  else if(r.game==="landlord")setupLandlord(r);
  else setupMahjong(r);
- emitRoom(r);
+ emitRoom(r);setTimeout(()=>maybeBotMove(r),650);
 }
 
 function setupBig2(r){
@@ -420,12 +424,19 @@ function timeoutTurn(r){
  else if(r.game==="mahjong"){if(p.hand[0])discardMahjong(r,p,p.hand[0].id,true)}
 }
 
+
+function botName(r){let i=1,n;do n=`電腦${i++}`;while(r.players.some(p=>p.name===n));return n}
+function addBot(r){if(r.game==="mahjong"||r.players.length>=GAME_META[r.game].players||!["waiting","countdown"].includes(r.status))return false;const p={pid:uid(),name:botName(r),socketId:null,connected:true,isBot:true,hand:[],covered:[],wins:0,role:null,submitted:false,melds:[],drawnUid:null};r.players.push(p);hist(r,`🤖 ${p.name} 加入房間`);emitRoom(r);maybeStart(r);return true}
+function big2BotChoice(r,p){const hand=[...p.hand];for(const c of hand)if(playBig2(r,p,[c.id],true))return true;for(let i=0;i<hand.length;i++)for(let j=i+1;j<hand.length;j++)if(playBig2(r,p,[hand[i].id,hand[j].id],true))return true;for(const ids of comb(hand,5).map(x=>x.map(c=>c.id)))if(playBig2(r,p,ids,true))return true;return passBig2(r,p,true)}
+function ddzBotChoice(r,p){for(const c of p.hand)if(playDDZ(r,p,[c.id],true))return true;for(let i=0;i<p.hand.length;i++)for(let j=i+1;j<p.hand.length;j++)if(playDDZ(r,p,[p.hand[i].id,p.hand[j].id],true))return true;return passDDZ(r,p,true)}
+function maybeBotMove(r){if(!r||r.status!=="playing"||r.game==="mahjong")return;if(r.game==="chinese"){for(const p of r.players.filter(x=>x.isBot&&!x.submitted)){const rec=chineseRecommend(p.hand)[0]||autoArrange(p.hand);p.chinese=rec;p.submitted=true;hist(r,`${p.name}（系統）已完成排牌`)}emitRoom(r);if(r.players.every(x=>x.submitted))resolveChinese(r);return}const p=r.players[r.currentTurn];if(!p?.isBot)return;if(r.game==="big2")big2BotChoice(r,p);else if(r.game==="sevens"){const c=p.hand.find(x=>sevenLegal(r,x));playSeven(r,p,(c||p.hand[0])?.id,!c,true)}else if(r.game==="landlord")ddzBotChoice(r,p)}
+
 io.on("connection",socket=>{
  socket.on("adminJoin",({ownerToken,adminToken}={})=>{
   ownerToken=String(ownerToken||"").trim();adminToken=String(adminToken||"");
   if(!adminSessions.has(adminToken))return socket.emit("adminAuthFailed");
   if(!ownerToken)return socket.emit("notice","主控身分建立失敗，請重新整理");
-  socket.data.adminAuthed=true;socket.data.adminOwnerToken=ownerToken;socket.join("admin:"+ownerToken);emitAdmins(ownerToken);
+  socket.data.adminAuthed=true;socket.data.adminOwnerToken=ownerToken;socket.join("admin:"+ownerToken);emitAdmins(ownerToken);emitArchives(ownerToken);
  });
  socket.on("createRoom",o=>{
   const owner=socket.data?.adminOwnerToken;if(!owner)return socket.emit("notice","請重新登入主控");
@@ -434,7 +445,7 @@ io.on("connection",socket=>{
  socket.on("deleteRoom",({code})=>{
   const r=rooms.get(code);if(!r)return;
   if(!socket.data?.adminOwnerToken||r.ownerToken!==socket.data.adminOwnerToken)return socket.emit("notice","你沒有這個房間的管理權");
-  clearAllTimers(r);io.to("room:"+code).emit("roomDeleted");rooms.delete(code);emitAdmins(r.ownerToken);socket.emit("notice","房間已刪除");
+  clearAllTimers(r);archiveRoom(r);const a=roomArchives.get(r.code);if(a)a.status="closed";io.to("room:"+code).emit("roomDeleted");rooms.delete(code);emitAdmins(r.ownerToken);emitArchives(r.ownerToken);socket.emit("notice","房間已刪除，開房紀錄仍保留");
  });
  socket.on("startRoom",({code})=>{
   const r=rooms.get(code);if(!r)return socket.emit("notice","找不到房間");
@@ -449,6 +460,10 @@ io.on("connection",socket=>{
   r.players=r.players.filter(x=>x.pid!==p.pid);hist(r,`${p.name} 已被主控踢除`);
   clearAllTimers(r);clearTimer(r,"reactionTimer");r.status="waiting";r.round=0;resetRoundState(r);emitRoom(r);socket.emit("notice",`${p.name} 已踢除`);
  });
+ socket.on("addBot",({code})=>{const r=rooms.get(String(code||""));if(!r)return socket.emit("notice","找不到房間");if(r.ownerToken!==socket.data?.adminOwnerToken)return socket.emit("notice","你沒有管理權");if(r.game==="mahjong")return socket.emit("notice","麻將目前不提供電腦玩家");if(!addBot(r))socket.emit("notice","目前不能加入電腦玩家")});
+ socket.on("removeBot",({code,pid})=>{const r=rooms.get(String(code||""));if(!r||r.ownerToken!==socket.data?.adminOwnerToken)return;const p=r.players.find(x=>x.pid===pid&&x.isBot);if(!p||!["waiting","countdown"].includes(r.status))return socket.emit("notice","只能在等待開始時移除電腦玩家");r.players=r.players.filter(x=>x.pid!==pid);hist(r,`🤖 ${p.name} 已移除`);emitRoom(r)});
+ socket.on("getRoomArchives",()=>{const o=socket.data?.adminOwnerToken;if(o)emitArchives(o)});
+ socket.on("deleteRoomArchive",({code})=>{const o=socket.data?.adminOwnerToken,a=roomArchives.get(String(code||""));if(!a||a.ownerToken!==o)return;roomArchives.delete(a.code);emitArchives(o);socket.emit("notice","開房紀錄已刪除")});
  socket.on("sendEmoji",({code,emoji})=>{const r=rooms.get(String(code||"")),p=r?.players.find(x=>x.pid===socket.data?.pid);const allowed=["👍","😂","😱","👏","😤","🤔"];if(!r||!p||!allowed.includes(emoji))return;const now=Date.now();if(p.lastEmojiAt&&now-p.lastEmojiAt<1000)return;p.lastEmojiAt=now;io.to("room:"+r.code).emit("emoji",{pid:p.pid,name:p.name,emoji});});
  socket.on("resumeRoom",({code,pid})=>{const r=rooms.get(String(code||"")),p=r?.players.find(x=>x.pid===String(pid||""));if(!r||!p||p.connected||!p.disconnectGrace)return socket.emit("resumeFailed");clearTimeout(p.disconnectGrace);p.disconnectGrace=null;p.connected=true;p.socketId=socket.id;socket.data={code:r.code,pid:p.pid};socket.join("room:"+r.code);socket.emit("joined",{code:r.code,pid:p.pid,resumed:true});hist(r,`${p.name} 連線已恢復`);emitRoom(r)});
  socket.on("joinRoom",({code,name,password})=>{
@@ -482,4 +497,4 @@ io.on("connection",socket=>{
  });
 });
 
-server.listen(PORT,"0.0.0.0",()=>console.log(`Card Hall V2.0 Official running on http://localhost:${PORT}`));
+server.listen(PORT,"0.0.0.0",()=>console.log(`Card Hall V2.0.2 Official running on http://localhost:${PORT}`));
