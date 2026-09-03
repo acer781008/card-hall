@@ -15,6 +15,7 @@ function validAdminToken(token){const [body,sig]=String(token||"").split(".");if
 app.post("/api/admin-login",(req,res)=>{if(String(req.body?.password||"")!==ADMIN_PASSWORD)return res.status(401).json({ok:false});res.json({ok:true,token:adminTokenSign(Date.now()+12*60*60*1000)})});
 app.post("/api/admin-session",(req,res)=>res.json({ok:validAdminToken(req.body?.token)}));
 app.use(express.static(path.join(__dirname,"public")));
+app.get("/",(req,res)=>res.redirect("/admin-login.html"));
 app.get("/health",(req,res)=>res.json({ok:true,rooms:rooms.size,version:"2.1.1"}));
 
 const PORT=process.env.PORT||3000;
