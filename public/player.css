@@ -412,3 +412,6 @@ body.game-big2 .board img.cardOut{margin:0!important}
  body.game-big2 .hand .card{width:58px!important;flex-basis:58px!important}
  body.game-big2 .hand{min-height:118px!important}
 }
+/* V2.1.1 結算亮牌 / 手機直式 */
+.resultHands{margin-top:10px;max-height:42vh;overflow:auto}.resultHandsTitle{font-weight:900;margin:8px 0}.resultHandRow{padding:7px;margin:6px 0;border-radius:10px;background:rgba(255,255,255,.09)}.resultHandRow .cardOut.mini{width:42px;margin:2px}
+@media(max-width:600px) and (orientation:portrait){.result.panel{width:min(94vw,520px);max-height:88vh;overflow:auto;padding:12px}.result.panel>div:first-child{font-size:32px!important}.result.panel h2{margin:4px 0}.resultHands{max-height:34vh}.resultHandRow{padding:5px;margin:4px 0}.resultHandRow .cardOut.mini{width:34px}.rankrow{padding:4px 6px}}
