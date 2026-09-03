@@ -18,10 +18,10 @@ button{background:#f3ce69;color:#2a2615}.err{min-height:24px;color:#ffb5b5;margi
 <form id="f"><input id="pw" type="password" autocomplete="current-password" placeholder="請輸入主控密碼" required>
 <button type="submit">進入主控管理</button></form>
 <div id="err" class="err"></div>
-<div class="small">V2.0 正式版</div>
+<div class="small">V2.0.6 正式版</div>
 </main>
 <script>
 const KEY="cardhall_admin_token_v2";
-const old=sessionStorage.getItem(KEY);if(old)fetch("/api/admin-session",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:old})}).then(r=>r.json()).then(d=>{if(d.ok)location.replace("admin.html");else sessionStorage.removeItem(KEY)}).catch(()=>{});
-document.querySelector("#f").addEventListener("submit",async e=>{e.preventDefault();const err=document.querySelector("#err");err.textContent="驗證中…";try{const r=await fetch("/api/admin-login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:document.querySelector("#pw").value})});if(!r.ok)throw 0;const d=await r.json();sessionStorage.setItem(KEY,d.token);location.replace("admin.html")}catch{err.textContent="主控密碼錯誤"}});
+const old=localStorage.getItem(KEY);if(old)fetch("/api/admin-session",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:old})}).then(r=>r.json()).then(d=>{if(d.ok)location.replace("admin.html");else localStorage.removeItem(KEY)}).catch(()=>{});
+document.querySelector("#f").addEventListener("submit",async e=>{e.preventDefault();const err=document.querySelector("#err");err.textContent="驗證中…";try{const r=await fetch("/api/admin-login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:document.querySelector("#pw").value})});if(!r.ok)throw 0;const d=await r.json();localStorage.setItem(KEY,d.token);location.replace("admin.html")}catch{err.textContent="主控密碼錯誤"}});
 </script></body></html>
