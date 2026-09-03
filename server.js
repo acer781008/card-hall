@@ -14,7 +14,7 @@ const adminSessions=new Set();
 app.post("/api/admin-login",(req,res)=>{if(String(req.body?.password||"")!==ADMIN_PASSWORD)return res.status(401).json({ok:false});const token=crypto.randomBytes(24).toString("hex");adminSessions.add(token);setTimeout(()=>adminSessions.delete(token),12*60*60*1000);res.json({ok:true,token})});
 app.post("/api/admin-session",(req,res)=>res.json({ok:adminSessions.has(String(req.body?.token||""))}));
 app.use(express.static(path.join(__dirname,"public")));
-app.get("/health",(req,res)=>res.json({ok:true,rooms:rooms.size,version:"2.0.3"}));
+app.get("/health",(req,res)=>res.json({ok:true,rooms:rooms.size,version:"2.0.4"}));
 
 const PORT=process.env.PORT||3000;
 const rooms=new Map();
@@ -501,4 +501,4 @@ io.on("connection",socket=>{
  });
 });
 
-server.listen(PORT,"0.0.0.0",()=>console.log(`Card Hall V2.0.3 Official running on http://localhost:${PORT}`));
+server.listen(PORT,"0.0.0.0",()=>console.log(`Card Hall V2.0.4 Official running on http://localhost:${PORT}`));
