@@ -136,8 +136,21 @@ function renderState(){
  if(state.status==="waiting")$("#turnText").textContent=`等待玩家（${state.connectedCount}/${state.needPlayers}）`;else if(state.status==="countdown")$("#turnText").textContent="準備開始";else if(state.status==="playing"){if(state.game==="chinese")$("#turnText").textContent="請完成本回合排牌";else{const p=state.players[state.currentTurn];$("#turnText").textContent=p?(p.pid===myPid?"⬇ 輪到你":"輪到："+p.name):""}}else $("#turnText").textContent="本回合結束";
  $("#countdown").classList.toggle("hidden",state.status!=="countdown");renderBoard();renderButtons();renderResult();startTicker();
 }
+function isMyTurn(){return !!(state&&state.status==="playing"&&state.players?.[state.currentTurn]?.pid===myPid)}
+function big2DisplayCards(cards,type){
+ const a=[...(cards||[])],rv={"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,"10":10,J:11,Q:12,K:13,A:14,"2":15},sv={C:0,D:1,H:2,S:3};
+ const byRankSuit=(x,y)=>(rv[x.rank]??0)-(rv[y.rank]??0)||(sv[x.suit]??0)-(sv[y.suit]??0);
+ if(type==="葫蘆"||type==="鐵支"){const cnt={};a.forEach(c=>cnt[c.rank]=(cnt[c.rank]||0)+1);return a.sort((x,y)=>(cnt[y.rank]-cnt[x.rank])||byRankSuit(x,y))}
+ return a.sort(byRankSuit);
+}
 function renderButtons(){
  $("#coverBtn").classList.toggle("hidden",state.game!=="sevens");$("#passBtn").classList.toggle("hidden",!["big2","landlord"].includes(state.game));$("#playBtn").classList.toggle("hidden",["chinese","mahjong"].includes(state.game));
+ const myTurn=isMyTurn();
+ if(["big2","sevens","landlord"].includes(state.game)){
+   $("#playBtn").disabled=!myTurn;
+   $("#coverBtn").disabled=!myTurn;
+   $("#passBtn").disabled=!myTurn||!state.lastPlay;
+ }
  const sp=$("#specialBtn");sp.classList.toggle("hidden",!["chinese","mahjong"].includes(state.game));sp.textContent=state.game==="chinese"?"排牌／確認":state.game==="mahjong"?"打出選取牌":"";
  const o=priv.mahjongOptions||{},mj=state.game==="mahjong";
  if(mj){
@@ -153,7 +166,7 @@ function renderBoard(){
  const b=$("#board");
  if(["big2","landlord"].includes(state.game)){
    const bottom=state.game==="landlord"&&state.board?.bottomCards?.length?`<div class="ddzBottom"><b>地主底牌</b>${state.board.bottomCards.map(c=>`<img class="cardOut mini" src="cards/${c.id}.svg">`).join("")}</div>`:"";
-   const play=state.lastPlay?state.lastPlay.cards.map(c=>`<img class="cardOut" src="cards/${c.id}.svg">`).join(""):"桌面尚無牌";
+   const play=state.lastPlay?big2DisplayCards(state.lastPlay.cards,state.lastPlay.type).map(c=>`<img class="cardOut" src="cards/${c.id}.svg">`).join(""):"桌面尚無牌";
    b.innerHTML=bottom+`<div>${play}</div>`;
  }
  else if(state.game==="sevens"){let h="";const ranks=["A","2","3","4","5","6","7","8","9","10","J","Q","K"],sn={C:"♣",D:"♦",H:"♥",S:"♠"};for(const su of ["C","D","H","S"]){const a=state.board?.[su]||[],m=new Map(a.map(c=>[c.rank,c]));h+=`<div class="sevenLane"><b>${sn[su]}</b><div class="sevenSlots">${ranks.map(r=>m.has(r)?`<img class="cardOut" src="cards/${m.get(r).id}.svg">`:`<span class="sevenEmpty"></span>`).join("")}</div></div>`}b.innerHTML=h}
@@ -176,8 +189,10 @@ function renderHand(){
      btn.addEventListener("click",e=>{e.preventDefault();const key=btn.dataset.key;sel.clear();sel.add(key);beep("click");renderHand();renderButtons()});
    });
  }else{
-   el.innerHTML=h.map((c,i)=>`<img class="card ${sel.has(c.id)?"sel":""} ${state?.game==="sevens"&&sevenLegalClient(c)?"legal":""} ${state?.game==="sevens"&&(i===0||h[i-1].suit!==c.suit)?"suitStart":""}" data-id="${c.id}" data-suit="${c.suit}" src="cards/${c.id}.svg">`).join("");
-   el.querySelectorAll(".card").forEach(x=>x.onclick=()=>{const id=x.dataset.id;sel.has(id)?sel.delete(id):sel.add(id);renderHand()})
+   const canPick=state?.game==="chinese"||isMyTurn();
+   el.classList.toggle("handLocked",!canPick&&["big2","sevens","landlord"].includes(state?.game));
+   el.innerHTML=h.map((c,i)=>`<img class="card ${sel.has(c.id)?"sel":""} ${state?.game==="sevens"&&sevenLegalClient(c)?"legal":""} ${state?.game==="sevens"&&(i===0||h[i-1].suit!==c.suit)?"suitStart":""} ${!canPick&&["big2","sevens","landlord"].includes(state?.game)?"locked":""}" data-id="${c.id}" data-suit="${c.suit}" src="cards/${c.id}.svg">`).join("");
+   el.querySelectorAll(".card").forEach(x=>x.onclick=()=>{if(!canPick)return;const id=x.dataset.id;sel.has(id)?sel.delete(id):sel.add(id);renderHand();renderButtons()})
  }
 }
 function renderResult(){if(["round_end","finished"].includes(state.status)&&state.winner){$("#result").classList.remove("hidden");$("#resultTitle").textContent=state.status==="finished"?"本場結束":"回合結束";$("#winnerText").innerHTML=`<h2>${esc(state.winner.name)} 獲勝</h2>`;$("#ranking").innerHTML=(state.ranking||[]).map(x=>`<div class="rankrow"><span>${x.rank}. ${esc(x.name)}</span><b>🏆 ${x.wins} 勝</b></div>`).join("");$("#nextText").textContent=state.status==="round_end"?`約 ${state.betweenSeconds} 秒後進入下一回合`:(state.continuous?`約 ${state.betweenSeconds} 秒後開始新一場`:"")}else $("#result").classList.add("hidden")}
