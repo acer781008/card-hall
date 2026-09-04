@@ -10,7 +10,7 @@ socket.io.on("reconnect",()=>{const pid=sessionStorage.getItem("cardhall_pid"),r
 socket.on("resumeFailed",()=>{joinedRoom=false;sessionStorage.removeItem("cardhall_pid");sessionStorage.removeItem("cardhall_room");toast("連線已中斷，請重新加入房間")});
 
 function toast(m){const n=$("#notice");n.textContent=m;n.classList.add("show");setTimeout(()=>n.classList.remove("show"),1700)}
-$("#join").onclick=()=>{const c=$("#code").value.trim(),name=$("#name").value.trim(),password=$("#pwd").value;localStorage.setItem("cardhall_name",name);socket.emit("joinRoom",{code:c,name,password})};
+$("#join").onclick=async()=>{if(soundOn)await unlockAudio();const c=$("#code").value.trim(),name=$("#name").value.trim(),password=$("#pwd").value;localStorage.setItem("cardhall_name",name);socket.emit("joinRoom",{code:c,name,password})};
 $("#soundBtn").onclick=async()=>{soundOn=!soundOn;localStorage.setItem("cardhall_sound",soundOn?"1":"0");syncSound();if(soundOn){await unlockAudio();beep("click")}};
 $("#cancelBtn").onclick=()=>{sel.clear();renderHand()};
 function optimisticSeven(cover){if(pendingSeven)return;if(sel.size!==1)return toast(cover?"請選一張要蓋掉的牌":"請選一張牌");const id=[...sel][0],card=priv.hand?.find(c=>c.id===id);if(!card)return;pendingSeven={priv:structuredClone(priv),state:structuredClone(state)};priv.hand=priv.hand.filter(c=>c.id!==id);if(!cover){state.board=state.board||{C:[],D:[],H:[],S:[]};state.board[card.suit]=[...(state.board[card.suit]||[]),card]}sel.clear();renderState();socket.emit("sevenAction",{code,id,cover});setTimeout(()=>{if(pendingSeven){priv=pendingSeven.priv;state=pendingSeven.state;pendingSeven=null;renderState()}},2500)}
@@ -150,7 +150,7 @@ function big2DisplayCards(cards,type){
  return a.sort(byRankSuit);
 }
 function renderButtons(){
- const turnGames=["big2","sevens","landlord","ninety9","redpoint","blackjack","texas"],myTurn=isMyTurn();
+ const turnGames=["big2","sevens","landlord","ninety9","redpoint","blackjack","texas"],myTurn=isMyTurn()&&!(state.game==="redpoint"&&state.board?.phase==="flip");
  $("#coverBtn").classList.toggle("hidden",state.game!=="sevens");$("#passBtn").classList.toggle("hidden",!["big2","landlord"].includes(state.game));$("#playBtn").classList.toggle("hidden",["chinese","mahjong","blackjack","texas"].includes(state.game));
  if(turnGames.includes(state.game)){ $("#playBtn").disabled=!myTurn;$("#coverBtn").disabled=!myTurn;$("#passBtn").disabled=!myTurn||!state.lastPlay; }
  const sp=$("#specialBtn"),alt=$("#altBtn");sp.classList.toggle("hidden",!["chinese","mahjong","blackjack","texas"].includes(state.game));alt.classList.toggle("hidden",!["blackjack","texas"].includes(state.game));
@@ -167,7 +167,7 @@ function renderBoard(){
  }
  else if(state.game==="sevens"){let h="";const ranks=["A","2","3","4","5","6","7","8","9","10","J","Q","K"],sn={C:"♣",D:"♦",H:"♥",S:"♠"};for(const su of ["C","D","H","S"]){const a=state.board?.[su]||[],m=new Map(a.map(c=>[c.rank,c]));h+=`<div class="sevenLane"><b>${sn[su]}</b><div class="sevenSlots">${ranks.map(r=>m.has(r)?`<img class="cardOut" src="cards/${m.get(r).id}.svg">`:`<span class="sevenEmpty"></span>`).join("")}</div></div>`}b.innerHTML=h}
  else if(state.game==="ninety9"){b.innerHTML=`<div class="turnText">目前總點數：<b style="font-size:42px">${state.board?.total??0}</b></div>${state.board?.lastCard?`<img class="cardOut" src="cards/${state.board.lastCard.id}.svg">`:""}`}
- else if(state.game==="redpoint"){b.innerHTML=`<div><b>桌面牌</b></div><div>${(state.board?.table||[]).map(c=>`<img class="cardOut mini" src="cards/${c.id}.svg">`).join("")}</div>`}
+ else if(state.game==="redpoint"){const rv=state.board?.revealed;b.innerHTML=`<div><b>桌面牌</b>｜牌堆剩 ${state.board?.deckCount??0} 張</div><div>${(state.board?.table||[]).map(c=>`<img class="cardOut mini" src="cards/${c.id}.svg">`).join("")}</div>${rv?`<div class="redFlipBox"><b>🂠 剛翻出的牌</b><div><img class="cardOut redFlipCard" src="cards/${rv.id}.svg"></div></div>`:""}`}
  else if(state.game==="blackjack"){const dealer=state.board?.dealer||[];b.innerHTML=`<div><b>莊家</b>｜${state.status==="playing"?"? 點":dealer.length?dealer.map(c=>`<img class="cardOut mini" src="cards/${c.id}.svg">`).join(""):""}</div>`}
  else if(state.game==="texas"){const n=(state.board?.community||[]).length;b.innerHTML=`<div><b>公共牌</b></div><div>${(state.board?.community||[]).slice(0,n).map(c=>`<img class="cardOut" src="cards/${c.id}.svg">`).join("")||"尚未翻牌"}</div>`}
  else if(state.game==="mahjong"){const ds=(state.board?.discards||[]).slice(-36),last=state.board?.lastDiscard?.tile?.uid;b.innerHTML=`${state.mahjongReaction?`<div class="reactionText">等待可操作玩家選擇 吃／碰／槓／胡／過</div>`:""}<div class="discardGrid">${ds.map(x=>`<img class="${x.tile.uid===last?"latestDiscard":""}" src="tiles/${x.tile.id}.svg">`).join("")}</div>`}
@@ -189,7 +189,7 @@ function renderHand(){
      btn.addEventListener("click",e=>{e.preventDefault();const key=btn.dataset.key;sel.clear();sel.add(key);beep("click");renderHand();renderButtons()});
    });
  }else{
-   const canPick=state?.game==="chinese"||isMyTurn();
+   const canPick=state?.game==="chinese"||(isMyTurn()&&!(state?.game==="redpoint"&&state?.board?.phase==="flip"));
    el.classList.toggle("handLocked",!canPick&&["big2","sevens","landlord","ninety9","redpoint"].includes(state?.game));
    el.innerHTML=h.map((c,i)=>`<img class="card ${sel.has(c.id)?"sel":""} ${state?.game==="sevens"&&sevenLegalClient(c)?"legal":""} ${state?.game==="sevens"&&(i===0||h[i-1].suit!==c.suit)?"suitStart":""} ${!canPick&&["big2","sevens","landlord","ninety9","redpoint"].includes(state?.game)?"locked":""}" data-id="${c.id}" data-suit="${c.suit}" src="cards/${c.id}.svg">`).join("");
    el.querySelectorAll(".card").forEach(x=>x.onclick=()=>{if(!canPick)return;const id=x.dataset.id;sel.has(id)?sel.delete(id):sel.add(id);renderHand();renderButtons()});
@@ -208,7 +208,7 @@ function renderResult(){
  $("#result").classList.remove("hidden");$("#resultTitle").textContent=state.status==="finished"?"本場結束":"回合結束";$("#winnerText").innerHTML=`<h2>${esc(state.winner.name)} 獲勝</h2>`;
  $("#ranking").innerHTML=(state.ranking||[]).map(x=>`<div class="rankrow"><span>${x.rank}. ${esc(x.name)}</span><b>🏆 ${x.wins} 勝${state.scoreEnabled?`｜⭐ ${x.points||0} 分`:""}</b></div>`).join("");
  const hs=state.resultHands||[];$("#resultHands").innerHTML=hs.length?`<div class="resultHandsTitle">本局公開牌面</div>${hs.map(x=>`<div class="resultHandRow"><b>${esc(x.name)}</b>${x.type?`｜${esc(x.type)}`:""}${x.value!=null?`｜${x.value}點${x.bust?"（爆點）":""}`:""}<div>${(x.cards||[]).map(c=>`<img class="cardOut mini" src="cards/${c.id}.svg">`).join("")}</div></div>`).join("")}`:"";
- $("#nextText").textContent=state.status==="round_end"?`約 ${state.betweenSeconds} 秒後進入下一回合；也可以現在離開房間`:(state.continuous?`約 ${state.betweenSeconds} 秒後開始新一場；也可以離開房間`:"本場已結束，可直接離開房間");
+ $("#nextText").textContent=state.status==="round_end"?`⏳ ${state.betweenSeconds} 秒後開始下一回合`:(state.continuous?`⏳ ${state.betweenSeconds} 秒後開始新一場`:"本場已結束，可直接離開房間");
 }
 function startTicker(){
  if(tick)clearInterval(tick);
@@ -224,10 +224,11 @@ function startTicker(){
      }
    }else lastCountdownSecond=null;
    const aiEl=$("#aiWaitText");if(aiEl&&state.aiFillDeadline){const n=Math.max(0,Math.ceil((state.aiFillDeadline-Date.now())/1000));aiEl.textContent=n>0?`還有 ${n} 秒，未滿將自動補齊 AI`:`正在補齊 AI…`;}
-   if(state.status==="playing"&&state.turnEndsAt){const n=Math.max(0,Math.ceil((state.turnEndsAt-Date.now())/1000));$("#timer").textContent=`⏱️ ${n} 秒`;if(n<=5&&n!==lastTurnSecond){lastTurnSecond=n;if(n>0)beep("count")}}else{$("#timer").textContent="";lastTurnSecond=null;}
+   if(state.status==="playing"&&state.turnEndsAt){const n=Math.max(0,Math.ceil((state.turnEndsAt-Date.now())/1000));$("#timer").textContent=`⏱️ ${n} 秒`;if(n<=5&&n!==lastTurnSecond){lastTurnSecond=n;if(n>0){if(soundOn&&audioCtx?.state==="suspended")unlockAudio();beep("count")}}}else{$("#timer").textContent="";lastTurnSecond=null;}
+   if(state.status==="round_end"&&state.nextRoundAt){const n=Math.max(0,Math.ceil((state.nextRoundAt-Date.now())/1000));$("#nextText").textContent=`⏳ ${n} 秒後開始下一回合`;}
  },120)
 }
-function rule(g){if(g==="big2")return `大老二（${state?.big2Mode==="traditional"?"傳統版":"經典版"}）：3 最小、2 最大；花色 ♣<♦<♥<♠；持有 ♣3 者先出，第一手需含 ♣3。${state?.big2Mode==="traditional"?"可單獨出三條，三條只能用更大的三條跟牌。":"不可單獨出三條。"} 鐵支必須是四張同點數＋任意一張，共 5 張；鐵支可跨牌型壓一般牌型；同花順可壓一般牌型與鐵支。順子 A2345 最小，23456 最大。`;if(g==="sevens")return "接龍：持有 ♠7 者先出。每個花色從 7 往上或往下接；如果手上沒有任何合法牌，必須選一張蓋牌。全部玩家處理完手牌後，以蓋牌最少者獲勝。";if(g==="chinese")return "十三支：13 張分成前3、中5、後5。可手動分墩或套用推薦排法，確認提交前可自由調整；後墩需 ≥ 中墩 ≥ 前墩。";if(g==="landlord")return "鬥地主公開測試：54 張（52 張＋小王＋大王）；3 人各 17 張，系統隨機地主後取得 3 張底牌。支援單張、對子、三條、三帶一、三帶二、順子、連對、無翅膀飛機、炸彈、王炸。2 與大小王不能放進順子／連對／飛機。";if(g==="mahjong")return "麻將：台灣 16 張。每人平常 16 張，摸牌後 17 張再打一張。支援吃、碰、明槓、暗槓、自摸、別人打出的牌胡牌與過；吃只能吃上家打出的牌。吃碰槓後會顯示在副露區。胡牌基本結構為五組面子＋一對將。";if(g==="ninety9")return state?.ninety9Mode==="special"?"99 特殊牌版：總點數不可超過99。A +1；4 迴轉；5 指定下一位玩家；10 可選 +10/-10；J 跳過；Q 可選 +20/-20；K 直接變成99。":"99 基本版：輪流出一張牌累加點數，總點數不可超過99。";if(g==="redpoint")return "撿紅點基本制：出牌與桌面同點數牌配對收回，最後比較收集的紅色花色牌。";if(g==="blackjack")return "21點基本制：要牌／停牌，盡量接近 21 點且不可超過。純勝場制，沒有下注或籌碼。";return "德州撲克娛樂基本制：2 張手牌＋5 張公共牌，以最佳 5 張牌型比大小；可繼續或棄牌，沒有下注或籌碼。"}
+function rule(g){if(g==="big2")return `大老二（${state?.big2Mode==="traditional"?"傳統版":"經典版"}）：3 最小、2 最大；花色 ♣<♦<♥<♠；持有 ♣3 者先出，第一手需含 ♣3。${state?.big2Mode==="traditional"?"可單獨出三條，三條只能用更大的三條跟牌。":"不可單獨出三條。"} 鐵支必須是四張同點數＋任意一張，共 5 張；鐵支可跨牌型壓一般牌型；同花順可壓一般牌型與鐵支。順子 A2345 最小，23456 最大。`;if(g==="sevens")return "接龍：持有 ♠7 者先出；同花色從 7 往上／往下接。沒有合法牌時必須蓋牌。最先出完手牌者獲勝 +10 分；其他玩家每剩 1 張牌 -1 分。";if(g==="chinese")return "十三支：13 張分成前3、中5、後5。可手動分墩或套用推薦排法，確認提交前可自由調整；後墩需 ≥ 中墩 ≥ 前墩。";if(g==="landlord")return "鬥地主公開測試：54 張（52 張＋小王＋大王）；3 人各 17 張，系統隨機地主後取得 3 張底牌。支援單張、對子、三條、三帶一、三帶二、順子、連對、無翅膀飛機、炸彈、王炸。2 與大小王不能放進順子／連對／飛機。";if(g==="mahjong")return "麻將：台灣 16 張。每人平常 16 張，摸牌後 17 張再打一張。支援吃、碰、明槓、暗槓、自摸、別人打出的牌胡牌與過；吃只能吃上家打出的牌。吃碰槓後會顯示在副露區。胡牌基本結構為五組面子＋一對將。";if(g==="ninety9")return state?.ninety9Mode==="special"?"99 特殊牌版：總點數不可超過99。A +1；4 迴轉；5 指定下一位玩家；10 可選 +10/-10；J 跳過；Q 可選 +20/-20；K 直接變成99。":"99 基本版：輪流出一張牌累加點數，總點數不可超過99。";if(g==="redpoint")return "撿紅點：輪到你時先出 1 張手牌；能與海底牌配對就把兩張一起收進得分區，不能配對則出的牌留在海底。接著翻 1 張牌堆牌；能配對就吃走，不能配對則留在海底。A～9 兩張相加必須等於 10；10、J、Q、K 必須相同才能吃。♥♦ 紅牌：A=20 分；2=2 分、3=3 分、4=4 分、5=5 分、6=6 分、7=7 分、8=8 分；9、10、J、Q、K=10 分；♠♣ 黑牌=0 分。整副 52 張全部處理完才結算，紅點總分最高者獲勝。";if(g==="blackjack")return "21點：要牌／停牌，盡量接近 21 點且不可超過。Blackjack +20；一般勝莊家 +10；平手 0；輸莊家或爆牌 -5。";return "德州撲克娛樂制：2 張手牌＋5 張公共牌，以最佳 5 張牌型比大小；可繼續或棄牌。每局贏家 +10，其他玩家 -5；沒有下注或籌碼。"}
 function esc(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
 
 const EMOJIS=["👍","😂","😱","👏","😤","🤔"];
