@@ -574,3 +574,18 @@ body.game-sevens .hand .card.sel::after{content:"✓"}
  body.game-sevens .hand .card:first-child{margin-left:0!important}
  body.game-sevens .hand .suitStart:not(:first-child){margin-left:12px!important}
 }
+
+/* V2.1.8 接龍：只壓縮中央牌與玩家手牌；上方玩家格完全沿用 V2.1.7 */
+@media(max-width:600px) and (orientation:portrait){
+ body.game-sevens .sevenSlots{display:grid!important;grid-template-columns:repeat(13,minmax(0,1fr))!important;gap:0!important;overflow:visible!important;padding-right:3px!important}
+ body.game-sevens .sevenSlot{min-width:0!important;overflow:visible!important;position:relative!important}
+ body.game-sevens .sevenSlot.played{background:transparent!important;box-shadow:none!important;z-index:2!important}
+ body.game-sevens .sevenSlot .cardOut{width:42px!important;height:auto!important;max-width:none!important;position:relative!important;z-index:3!important;box-shadow:0 1px 3px #0008!important}
+ body.game-sevens .sevenEmpty{background:rgba(255,255,255,.06)!important;border:1px dashed rgba(255,255,255,.18)!important}
+ body.game-sevens .hand{overflow:visible!important;justify-content:center!important;padding-left:6px!important;padding-right:6px!important}
+ body.game-sevens .hand .card{width:56px!important;flex:0 0 56px!important;margin-left:var(--seven-card-margin,-32px)!important;position:relative!important}
+ body.game-sevens .hand .card:first-child{margin-left:0!important}
+ body.game-sevens .hand .suitStart:not(:first-child){margin-left:calc(var(--seven-card-margin,-32px) + 8px)!important}
+ body.game-sevens .hand .card.legal{outline:3px solid #ffd84a!important;outline-offset:-3px!important;transform:translateY(-4px)!important}
+ body.game-sevens .hand .card.sel,body.game-sevens .hand .card.sel.legal{outline:4px solid #39a9ff!important;outline-offset:-4px!important;transform:translateY(-14px)!important;z-index:20!important;filter:drop-shadow(0 4px 4px #0008)!important}
+}
