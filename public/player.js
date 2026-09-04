@@ -1,7 +1,7 @@
 
 const socket=io({reconnection:true,reconnectionAttempts:8,reconnectionDelay:500,reconnectionDelayMax:2500}),$=s=>document.querySelector(s);
 let code=null,state=null,priv={hand:[]},sel=new Set(),tick=null,soundOn=localStorage.getItem("cardhall_sound")!=="0",myPid=null;
-let audioCtx=null,audioUnlocked=false,lastCountdownSecond=null,lastTurnSecond=null,mjBusy=false,lastTurnPid=null,lastStatus=null,pendingSeven=null,pendingPlay=null;
+let audioCtx=null,audioUnlocked=false,speechUnlocked=false,lastCountdownSecond=null,lastTurnSecond=null,mjBusy=false,lastTurnPid=null,lastStatus=null,pendingSeven=null,pendingPlay=null;
 const qp=new URLSearchParams(location.search);if(qp.get("room")){$("#code").value=qp.get("room");$("#code").readOnly=true}
 $("#name").value=localStorage.getItem("cardhall_name")||"";syncSound();
 let joinedRoom=false;
@@ -11,7 +11,7 @@ socket.on("resumeFailed",()=>{joinedRoom=false;sessionStorage.removeItem("cardha
 
 function toast(m){const n=$("#notice");n.textContent=m;n.classList.add("show");setTimeout(()=>n.classList.remove("show"),1700)}
 $("#join").onclick=async()=>{if(soundOn)await unlockAudio();const c=$("#code").value.trim(),name=$("#name").value.trim(),password=$("#pwd").value;localStorage.setItem("cardhall_name",name);socket.emit("joinRoom",{code:c,name,password})};
-$("#soundBtn").onclick=async()=>{soundOn=!soundOn;localStorage.setItem("cardhall_sound",soundOn?"1":"0");syncSound();if(soundOn){await unlockAudio();beep("click")}};
+$("#soundBtn").onclick=async()=>{soundOn=!soundOn;localStorage.setItem("cardhall_sound",soundOn?"1":"0");syncSound();if(soundOn){await unlockAudio();primeSpeech();beep("click")}};
 $("#cancelBtn").onclick=()=>{sel.clear();renderHand()};
 function optimisticSeven(cover){if(pendingSeven)return;if(sel.size!==1)return toast(cover?"請選一張要蓋掉的牌":"請選一張牌");const id=[...sel][0],card=priv.hand?.find(c=>c.id===id);if(!card)return;pendingSeven={priv:structuredClone(priv),state:structuredClone(state)};priv.hand=priv.hand.filter(c=>c.id!==id);if(!cover){state.board=state.board||{C:[],D:[],H:[],S:[]};state.board[card.suit]=[...(state.board[card.suit]||[]),card]}sel.clear();renderState();socket.emit("sevenAction",{code,id,cover});setTimeout(()=>{if(pendingSeven){priv=pendingSeven.priv;state=pendingSeven.state;pendingSeven=null;renderState()}},2500)}
 $("#playBtn").onclick=()=>{if(!state)return;if(state.game==="sevens")return optimisticSeven(false);const ids=[...sel];if(["ninety9","redpoint"].includes(state.game)&&ids.length!==1)return toast("請選一張牌");if(!ids.length)return toast("請先選牌");if(state.game==="ninety9"&&state.ninety9Mode==="special")return play99Special(ids[0]);if(["big2","ninety9","redpoint"].includes(state.game)){pendingPlay=structuredClone(priv);priv.hand=priv.hand.filter(c=>!ids.includes(c.id));sel.clear();renderHand()}socket.emit("playCards",{code,ids});setTimeout(()=>{if(pendingPlay){priv=pendingPlay;pendingPlay=null;renderHand()}},2200)};
@@ -64,7 +64,7 @@ async function unlockAudio(){
  const a=getAudio();if(!a)return false;
  try{if(a.state==="suspended")await a.resume();audioUnlocked=a.state==="running";return audioUnlocked}catch{return false}
 }
-document.addEventListener("pointerdown",()=>{if(soundOn)unlockAudio()},{passive:true});
+document.addEventListener("pointerdown",()=>{if(soundOn){unlockAudio();primeSpeech()}},{passive:true});
 document.addEventListener("keydown",()=>{if(soundOn)unlockAudio()},{passive:true});
 
 function beep(kind="click"){
@@ -86,12 +86,17 @@ const MJ_NAMES={
  "E":"東風","S":"南風","W":"西風","N":"北風","R":"紅中","G":"發財","Wh":"白板"
 };
 for(const suit of [["m","萬"],["p","筒"],["s","條"]])for(let n=1;n<=9;n++)MJ_NAMES[n+suit[0]]=`${["","一","二","三","四","五","六","七","八","九"][n]}${suit[1]}`;
+function primeSpeech(){
+ if(speechUnlocked||!("speechSynthesis" in window)||!("SpeechSynthesisUtterance" in window))return;
+ try{const u=new SpeechSynthesisUtterance(" ");u.lang="zh-TW";u.volume=.01;speechSynthesis.speak(u);speechUnlocked=true}catch{}
+}
 function speak(text){
- if(!soundOn||!text||!("speechSynthesis"in window))return;
+ if(!soundOn||!text||!("speechSynthesis"in window)||!("SpeechSynthesisUtterance"in window))return;
  try{
-   const u=new SpeechSynthesisUtterance(text);u.lang="zh-TW";u.rate=1.05;u.pitch=1;u.volume=.9;
+   if(speechSynthesis.paused)speechSynthesis.resume();
+   const u=new SpeechSynthesisUtterance(text);u.lang="zh-TW";u.rate=.98;u.pitch=1;u.volume=1;
    const voices=speechSynthesis.getVoices();const tw=voices.find(v=>/zh[-_]TW/i.test(v.lang))||voices.find(v=>/^zh/i.test(v.lang));if(tw)u.voice=tw;
-   speechSynthesis.cancel();speechSynthesis.speak(u);
+   speechSynthesis.cancel();setTimeout(()=>{try{speechSynthesis.speak(u)}catch{}},30);
  }catch{}
 }
 socket.on("gameSound",e=>{
@@ -202,7 +207,7 @@ function renderHand(){
 
 function fitSevensPortraitHand(el,hand){
  if(state?.game!=="sevens"||!matchMedia("(max-width:600px) and (orientation:portrait)").matches||!hand?.length){el.style.removeProperty("--seven-card-margin");return}
- const w=56,avail=Math.max(250,el.clientWidth-12),groups=new Set(hand.map(c=>c.suit)).size,gap=Math.max(0,groups-1)*8;
+ const w=56,avail=Math.max(230,el.clientWidth-28),groups=new Set(hand.map(c=>c.suit)).size,gap=Math.max(0,groups-1)*8;
  let margin=0;if(hand.length>1){const step=(avail-w-gap)/(hand.length-1);margin=Math.min(-18,Math.max(-43,step-w))}
  el.style.setProperty("--seven-card-margin",`${margin}px`);
 }
