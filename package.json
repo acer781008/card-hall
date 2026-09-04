@@ -1,8 +1,8 @@
 {
   "name": "multiplayer-card-hall",
-  "version": "2.1.1",
+  "version": "2.1.5",
   "private": true,
-  "description": "多人棋牌館 V2.1.0 九款棋牌、出牌秒數、分享備註、AI 補位版",
+  "description": "多人棋牌館 V2.1.5 撿紅點翻牌顯示、分數紀錄複製修正版",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
