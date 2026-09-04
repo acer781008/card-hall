@@ -165,7 +165,15 @@ function renderBoard(){
    const play=state.lastPlay?big2DisplayCards(state.lastPlay.cards,state.lastPlay.type).map(c=>`<img class="cardOut" src="cards/${c.id}.svg">`).join(""):"桌面尚無牌";
    b.innerHTML=bottom+`<div>${play}</div>`;
  }
- else if(state.game==="sevens"){let h="";const ranks=["A","2","3","4","5","6","7","8","9","10","J","Q","K"],sn={C:"♣",D:"♦",H:"♥",S:"♠"};for(const su of ["C","D","H","S"]){const a=state.board?.[su]||[],m=new Map(a.map(c=>[c.rank,c]));h+=`<div class="sevenLane"><b>${sn[su]}</b><div class="sevenSlots">${ranks.map(r=>m.has(r)?`<img class="cardOut" src="cards/${m.get(r).id}.svg">`:`<span class="sevenEmpty"></span>`).join("")}</div></div>`}b.innerHTML=h}
+ else if(state.game==="sevens"){
+   let h="";
+   const ranks=["A","2","3","4","5","6","7","8","9","10","J","Q","K"],sn={C:"♣",D:"♦",H:"♥",S:"♠"};
+   for(const su of ["C","D","H","S"]){
+     const a=state.board?.[su]||[],m=new Map(a.map(c=>[c.rank,c]));
+     h+=`<div class="sevenLane suit-${su}"><b class="sevenSuit">${sn[su]}</b><div class="sevenSlots">${ranks.map(r=>m.has(r)?`<span class="sevenSlot played"><img class="cardOut" src="cards/${m.get(r).id}.svg" alt="${r}${sn[su]}"></span>`:`<span class="sevenSlot sevenEmpty"><small>${r}</small></span>`).join("")}</div></div>`;
+   }
+   b.innerHTML=h;
+ }
  else if(state.game==="ninety9"){b.innerHTML=`<div class="turnText">目前總點數：<b style="font-size:42px">${state.board?.total??0}</b></div>${state.board?.lastCard?`<img class="cardOut" src="cards/${state.board.lastCard.id}.svg">`:""}`}
  else if(state.game==="redpoint"){const rv=state.board?.revealed;b.innerHTML=`<div><b>桌面牌</b>｜牌堆剩 ${state.board?.deckCount??0} 張</div><div>${(state.board?.table||[]).map(c=>`<img class="cardOut mini" src="cards/${c.id}.svg">`).join("")}</div>${rv?`<div class="redFlipBox"><b>🂠 剛翻出的牌</b><div><img class="cardOut redFlipCard" src="cards/${rv.id}.svg"></div></div>`:""}`}
  else if(state.game==="blackjack"){const dealer=state.board?.dealer||[];b.innerHTML=`<div><b>莊家</b>｜${state.status==="playing"?"? 點":dealer.length?dealer.map(c=>`<img class="cardOut mini" src="cards/${c.id}.svg">`).join(""):""}</div>`}

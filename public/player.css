@@ -432,3 +432,145 @@ body.game-big2 .board img.cardOut{margin:0!important}
 .redFlipBox{margin-top:10px;padding:8px 12px;border-radius:12px;background:rgba(255,244,196,.96);color:#5b3218;border:2px solid #d69a32;text-align:center;box-shadow:0 5px 14px #0005}
 .redFlipCard{width:72px!important;margin-top:5px;animation:redFlipPop .28s ease-out}
 @keyframes redFlipPop{from{transform:translateY(-14px) scale(.72);opacity:.2}to{transform:translateY(0) scale(1);opacity:1}}
+
+
+/* V2.1.6 接龍手機牌面重做：四花色一目了然、提示牌與已選牌明確區分 */
+body.game-sevens .board{
+  display:flex!important;
+  flex-direction:column!important;
+  align-items:stretch!important;
+  justify-content:center!important;
+  gap:6px!important;
+  width:100%!important;
+  min-height:0!important;
+}
+body.game-sevens .sevenLane{
+  display:grid!important;
+  grid-template-columns:28px minmax(0,1fr)!important;
+  align-items:center!important;
+  gap:4px!important;
+  width:100%!important;
+  margin:0!important;
+}
+body.game-sevens .sevenSuit{
+  width:28px!important;
+  text-align:center!important;
+  font-size:23px!important;
+  line-height:1!important;
+  text-shadow:0 2px 2px #0008;
+}
+body.game-sevens .suit-D .sevenSuit,body.game-sevens .suit-H .sevenSuit{color:#ff6b6b!important}
+body.game-sevens .suit-C .sevenSuit,body.game-sevens .suit-S .sevenSuit{color:#f4f4f4!important}
+body.game-sevens .sevenSlots{
+  display:grid!important;
+  grid-template-columns:repeat(13,minmax(0,1fr))!important;
+  gap:2px!important;
+  width:100%!important;
+  min-width:0!important;
+}
+body.game-sevens .sevenSlot{
+  position:relative!important;
+  display:flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  width:100%!important;
+  aspect-ratio:5/7!important;
+  min-width:0!important;
+  border-radius:4px!important;
+  box-sizing:border-box!important;
+  overflow:hidden!important;
+}
+body.game-sevens .sevenSlot.played{background:#fff!important;box-shadow:0 2px 4px #0008!important}
+body.game-sevens .sevenSlot .cardOut{
+  display:block!important;
+  width:100%!important;
+  height:100%!important;
+  object-fit:contain!important;
+  margin:0!important;
+  filter:none!important;
+}
+body.game-sevens .sevenEmpty{
+  border:1px dashed rgba(255,255,255,.38)!important;
+  background:rgba(0,0,0,.16)!important;
+  color:rgba(255,255,255,.72)!important;
+}
+body.game-sevens .sevenEmpty small{
+  font-size:clamp(7px,2.2vw,12px)!important;
+  font-weight:900!important;
+  line-height:1!important;
+}
+/* 黃色＝可出的提示；藍色＋勾勾＝你真正選中的牌 */
+body.game-sevens .hand .card.legal{
+  outline:3px solid #ffe15a!important;
+  outline-offset:1px!important;
+  box-shadow:0 0 0 2px rgba(255,225,90,.28),0 0 10px rgba(255,225,90,.78)!important;
+  filter:brightness(1.07)!important;
+  transform:translateY(-5px)!important;
+}
+body.game-sevens .hand .card.sel,
+body.game-sevens .hand .card.sel.legal{
+  outline:4px solid #4fc3ff!important;
+  outline-offset:1px!important;
+  box-shadow:0 0 0 2px rgba(79,195,255,.3),0 0 14px rgba(79,195,255,.95)!important;
+  filter:brightness(1.08)!important;
+  transform:translateY(-15px) scale(1.04)!important;
+  z-index:20!important;
+}
+body.game-sevens .hand .card.sel::after{content:"✓"}
+
+@media(max-width:600px) and (orientation:portrait){
+ body.game-sevens .felt{min-height:720px!important}
+ body.game-sevens .center{top:39%!important;width:calc(100% - 18px)!important;max-width:none!important}
+ body.game-sevens .board{gap:5px!important;padding:5px 2px!important}
+ body.game-sevens .sevenLane{grid-template-columns:24px minmax(0,1fr)!important;gap:2px!important}
+ body.game-sevens .sevenSuit{width:24px!important;font-size:20px!important}
+ body.game-sevens .sevenSlots{gap:1px!important}
+ body.game-sevens .sevenSlot{border-radius:2px!important}
+ body.game-sevens .sevenEmpty small{font-size:8px!important}
+ body.game-sevens .bottom{bottom:8px!important}
+ body.game-sevens .buttons{margin-bottom:3px!important}
+ body.game-sevens .hand{
+   display:flex!important;
+   flex-wrap:nowrap!important;
+   justify-content:flex-start!important;
+   align-items:flex-end!important;
+   overflow-x:auto!important;
+   overflow-y:visible!important;
+   width:calc(100% - 8px)!important;
+   min-height:112px!important;
+   margin:0 auto!important;
+   padding:18px 8px 5px!important;
+   scroll-padding-left:8px;
+ }
+ body.game-sevens .hand .card{
+   width:52px!important;
+   flex:0 0 52px!important;
+   margin-left:-14px!important;
+ }
+ body.game-sevens .hand .card:first-child{margin-left:0!important}
+ body.game-sevens .hand .suitStart:not(:first-child){margin-left:8px!important}
+ body.game-sevens .hand .card.legal{transform:translateY(-4px)!important}
+ body.game-sevens .hand .card.sel,body.game-sevens .hand .card.sel.legal{transform:translateY(-14px) scale(1.05)!important}
+}
+@media(max-width:390px) and (orientation:portrait){
+ body.game-sevens .center{top:38%!important;width:calc(100% - 12px)!important}
+ body.game-sevens .sevenLane{grid-template-columns:21px minmax(0,1fr)!important}
+ body.game-sevens .sevenSuit{width:21px!important;font-size:18px!important}
+ body.game-sevens .sevenEmpty small{font-size:7px!important}
+ body.game-sevens .hand .card{width:49px!important;flex-basis:49px!important;margin-left:-14px!important}
+}
+
+/* V2.1.7 接龍手機：桌面四花色橫排更省高度；玩家手牌比照大老二清楚橫排並依花色分組 */
+@media(max-width:600px) and (orientation:portrait){
+ body.game-sevens .felt{min-height:650px!important}
+ body.game-sevens .center{top:35%!important;width:calc(100% - 10px)!important}
+ body.game-sevens .board{gap:3px!important;padding:3px 1px!important}
+ body.game-sevens .sevenLane{grid-template-columns:20px minmax(0,1fr)!important;gap:1px!important}
+ body.game-sevens .sevenSuit{width:20px!important;font-size:18px!important}
+ body.game-sevens .sevenSlots{gap:1px!important}
+ body.game-sevens .bottom{bottom:6px!important}
+ body.game-sevens .hand{min-height:118px!important;padding:20px 6px 6px!important;overflow-x:auto!important;overflow-y:visible!important}
+ body.game-sevens .hand .card{width:56px!important;flex:0 0 56px!important;margin-left:-13px!important}
+ body.game-sevens .hand .card:first-child{margin-left:0!important}
+ body.game-sevens .hand .suitStart:not(:first-child){margin-left:12px!important}
+}
