@@ -55,7 +55,7 @@ function sortCards(a){return a.sort((x,y)=>x.rv-y.rv||x.sv-y.sv)}
 function pname(r,pid){return r.players.find(p=>p.pid===pid)?.name||"玩家"}
 function hist(r,text){r.history.push({t:Date.now(),text});if(r.history.length>40)r.history.shift()}
 function clearTimer(r,k){if(r[k])clearTimeout(r[k]);r[k]=null}
-function clearAllTimers(r){["startTimer","turnTimer","nextTimer","aiFillTimer","redFlipTimer"].forEach(k=>clearTimer(r,k));r.aiFillDeadline=null}
+function clearAllTimers(r){["startTimer","turnTimer","nextTimer","aiFillTimer","redFlipTimer","reactionTimer"].forEach(k=>clearTimer(r,k));r.aiFillDeadline=null}
 function countConnected(r){return r.players.filter(p=>p.connected||p.isBot).length}
 function archiveRoom(r){const a=roomArchives.get(r.code)||{code:r.code,game:r.game,gameName:GAME_META[r.game]?.name||r.game,createdAt:r.createdAt||Date.now(),lastActiveAt:Date.now(),players:[],rounds:0,results:[],ownerToken:r.ownerToken,status:r.status};a.lastActiveAt=Date.now();a.status=r.status;a.players=[...new Set([...(a.players||[]),...r.players.map(p=>p.name)])];a.rounds=Math.max(a.rounds||0,r.round||0);a.results=[...(r.matchResults||[])];roomArchives.set(r.code,a)}
 function emitArchives(owner){if(!owner)return;io.to("admin:"+owner).emit("roomArchives",[...roomArchives.values()].filter(a=>a.ownerToken===owner).sort((a,b)=>b.createdAt-a.createdAt))}
@@ -203,7 +203,7 @@ function startRound(r){
  else if(r.game==="redpoint")setupRedPoint(r);
  else if(r.game==="blackjack")setupBlackjack(r);
  else setupTexas(r);
- emitRoom(r);setTimeout(()=>maybeBotMove(r),650);
+ emitRoom(r);if(r.game!=="chinese")setTimeout(()=>maybeBotMove(r),650);
 }
 
 function setupBig2(r){
@@ -272,7 +272,11 @@ function playSeven(r,p,id,cover=false,auto=false){
 
 function setupChinese(r){
  const d=shuffle(deck52());for(let i=0;i<52;i++)r.players[i%4].hand.push(d[i]);r.players.forEach(p=>sortCards(p.hand));
- r.players.forEach(p=>p.chineseRecommendations=null);r.currentTurn=null;r.turnEndsAt=null;clearTimer(r,"turnTimer");emitRoom(r);
+ r.players.forEach(p=>p.chineseRecommendations=null);r.currentTurn=null;clearTimer(r,"turnTimer");
+ // 十三支為同時排牌；若房內有 AI，仍顯示一個明確倒數，倒數完 AI 才提交。
+ const hasBot=r.players.some(p=>p.isBot);const aiDelay=hasBot?Math.max(3,r.turnSeconds||8):0;
+ r.turnEndsAt=hasBot?Date.now()+aiDelay*1000:null;emitRoom(r);
+ if(hasBot)r.turnTimer=setTimeout(()=>{r.turnTimer=null;r.turnEndsAt=null;maybeBotMove(r);emitRoom(r)},aiDelay*1000);
 }
 function autoArrange(h){const x=[...h].sort((a,b)=>a.rv-b.rv||a.sv-b.sv);return{front:x.slice(0,3),middle:x.slice(3,8),back:x.slice(8)}}
 function comb(a,k,start=0,p=[],out=[]){if(p.length===k){out.push([...p]);return out}for(let i=start;i<=a.length-(k-p.length);i++){p.push(a[i]);comb(a,k,i+1,p,out);p.pop()}return out}
@@ -446,10 +450,15 @@ function resolveMahjongReaction(r){
  if(!c){r.currentTurn=(di+1)%4;drawTile(r,r.currentTurn);return}
  const p=r.players.find(x=>x.pid===c.pid),t=q.tile;p.drawnUid=null;
  if(c.type==="win"){const d=r.players.find(x=>x.pid===q.discarderPid);hist(r,`🀄 ${p.name} 胡牌｜${d?.name||""} 放槍`);finishRound(r,p,{discarderPid:q.discarderPid,detail:`胡牌：${p.name} +10｜放槍：${d?.name||""} -10`});return}
+ let got=null;
+ if(c.type==="pong")got=removeTiles(p,[t.id,t.id]);
+ if(c.type==="kong")got=removeTiles(p,[t.id,t.id,t.id]);
+ if(c.type==="chow"){const need=(c.ids||[]).filter(id=>id!==t.id);got=removeTiles(p,need)}
+ if(!got){hist(r,`麻將宣告失敗，自動續局`);r.currentTurn=(di+1)%4;drawTile(r,r.currentTurn);return}
  removeClaimedDiscard(r,q);
- if(c.type==="pong"){const got=removeTiles(p,[t.id,t.id]);if(!got){r.currentTurn=(di+1)%4;drawTile(r,r.currentTurn);return}p.melds.push({type:"碰",tiles:[...got,t]});hist(r,`${p.name} 碰`);io.to("room:"+r.code).emit("gameSound",{game:"mahjong",action:"pong",playerName:p.name})}
- if(c.type==="kong"){const got=removeTiles(p,[t.id,t.id,t.id]);if(!got){r.currentTurn=(di+1)%4;drawTile(r,r.currentTurn);return}p.melds.push({type:"明槓",tiles:[...got,t]});hist(r,`${p.name} 明槓`);io.to("room:"+r.code).emit("gameSound",{game:"mahjong",action:"kong",playerName:p.name})}
- if(c.type==="chow"){const need=c.ids.filter(id=>id!==t.id);const got=removeTiles(p,need);if(!got){r.currentTurn=(di+1)%4;drawTile(r,r.currentTurn);return}const tiles=[...got,t].sort((a,b)=>a.sort-b.sort);p.melds.push({type:"吃",tiles});hist(r,`${p.name} 吃`);io.to("room:"+r.code).emit("gameSound",{game:"mahjong",action:"chow",playerName:p.name})}
+ if(c.type==="pong"){p.melds.push({type:"碰",tiles:[...got,t]});hist(r,`${p.name} 碰`);io.to("room:"+r.code).emit("gameSound",{game:"mahjong",action:"pong",playerName:p.name})}
+ if(c.type==="kong"){p.melds.push({type:"明槓",tiles:[...got,t]});hist(r,`${p.name} 明槓`);io.to("room:"+r.code).emit("gameSound",{game:"mahjong",action:"kong",playerName:p.name})}
+ if(c.type==="chow"){const tiles=[...got,t].sort((a,b)=>a.sort-b.sort);p.melds.push({type:"吃",tiles});hist(r,`${p.name} 吃`);io.to("room:"+r.code).emit("gameSound",{game:"mahjong",action:"chow",playerName:p.name})}
  r.currentTurn=seat(p.pid);p.hand.sort((a,b)=>a.sort-b.sort);
  if(c.type==="kong"){if(r.wall.length){const kt=r.wall.pop();p.hand.push(kt);p.drawnUid=kt.uid}p.hand.sort((a,b)=>a.sort-b.sort)}
  validateMahjongTiles(r);scheduleTurn(r);
@@ -472,7 +481,10 @@ function mahjongClaim(r,p,type,ids=[]){
  if(type==="win"&&!o.win)return false;if(type==="pong"&&!o.pong)return false;if(type==="kong"&&!o.kong)return false;
  if(type==="chow"&&!o.chows.some(a=>JSON.stringify(a)===JSON.stringify(ids)))return false;
  q.claims[p.pid]={pid:p.pid,type,ids};delete q.passes[p.pid];emitRoom(r);
- if(type==="win")resolveMahjongReaction(r);else maybeResolveMahjongReaction(r,q.claims[p.pid]);return true;
+ if(type==="win")resolveMahjongReaction(r);else maybeResolveMahjongReaction(r,q.claims[p.pid]);
+ // 防止吃／碰／槓宣告後因其他反應狀態異常而永久卡桌。
+ if(r.mahjongReaction){clearTimer(r,"reactionTimer");r.reactionTimer=setTimeout(()=>resolveMahjongReaction(r),1800)}
+ return true;
 }
 function mahjongPass(r,p){const q=r.mahjongReaction;if(!q||!(q.eligiblePids||[]).includes(p.pid))return false;q.passes[p.pid]=true;delete q.claims[p.pid];emitRoom(r);maybeResolveMahjongReaction(r);return true}
 function concealedKong(r,p,id){
